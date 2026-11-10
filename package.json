@@ -5,7 +5,7 @@
   "devDependencies": {
     "@nx/vite": "^24.0.5",
     "@nx/web": "24.0.5",
-    "jiti": "2.4.2",
+    "jiti": "2.7.0",
     "nx": "24.0.5",
     "typescript": "~5.9.3",
     "vite": "^8.0.0"
