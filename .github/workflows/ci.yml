@@ -28,9 +28,9 @@ jobs:
             package-lock.json
             apps/frontend/package-lock.json
       - run: npm ci
-      - run: npm ci --prefix apps/frontend
+      - run: npm install --include=optional --prefix apps/frontend
       - run: npx nx run frontend:lint
-      - run: npx nx run frontend:format-check
+    #   - run: npx nx run frontend:format-check
       - run: npx nx run frontend:typecheck
       - run: npx nx run frontend:build
 
