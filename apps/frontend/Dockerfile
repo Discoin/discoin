@@ -2,9 +2,8 @@ FROM node:22-alpine AS build
 
 WORKDIR /app/apps/frontend
 
-COPY package.json /app/package.json
 COPY apps/frontend/package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY apps/frontend/ ./
 RUN npm run build
