@@ -1,0 +1,19 @@
+{
+  "name": "frontend",
+  "targets": {
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run lint",
+        "cwd": "apps/frontend"
+      }
+    },
+    "format-check": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "npm run format:check",
+        "cwd": "apps/frontend"
+      }
+    }
+  }
+}

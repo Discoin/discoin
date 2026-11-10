@@ -22,6 +22,9 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.1"
   },
+  "overrides": {
+    "immutable": "^5.1.10"
+  },
   "eslintConfig": {
     "extends": "preact"
   }
