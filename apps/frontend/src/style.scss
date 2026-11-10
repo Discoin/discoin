@@ -1,0 +1,74 @@
+$text-color: #222;
+$dark-text-color: #ccc;
+$background-color: #fff;
+$dark-background-color: #1a1a1a;
+$header-color: #673ab8;
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color: $text-color;
+  background-color: $background-color;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+header {
+  display: flex;
+  justify-content: flex-end;
+  background-color: $header-color;
+
+  nav {
+    display: flex;
+  }
+
+  a {
+    color: #fff;
+    padding: 0.75rem;
+    text-decoration: none;
+
+    &.active {
+      background-color: #0005;
+    }
+
+    &:hover {
+      background-color: #0008;
+    }
+  }
+}
+
+main {
+  flex: auto;
+  display: flex;
+  align-items: center;
+  max-width: 1280px;
+  margin: 0 auto;
+  text-align: center;
+
+  @media (max-width: 639px) {
+    margin: 2rem;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: $dark-text-color;
+    background-color: $dark-background-color;
+  }
+}

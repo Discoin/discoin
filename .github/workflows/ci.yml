@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend lint, format, and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/frontend/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix apps/frontend
+      - run: npx nx run frontend:lint
+      - run: npx nx run frontend:format:check
+      - run: npx nx run frontend:typecheck
+      - run: npx nx run frontend:build
+
+  api:
+    name: API lint, format, and lockfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: check apps/api
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: format --check apps/api
+      - run: uv lock --check
+        working-directory: apps/api
+      - run: python -m py_compile main.py
+        working-directory: apps/api
+
+  security:
+    name: Dependency security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm audit --audit-level=high
+      - run: npm audit --audit-level=high
+        working-directory: apps/frontend
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.15"
+      - uses: astral-sh/setup-uv@v6
+      - run: uv export --locked --format requirements-txt --no-dev --no-emit-project --output-file /tmp/api-requirements.txt
+        working-directory: apps/api
+      - run: uvx pip-audit --requirement /tmp/api-requirements.txt
+
+  docker:
+    name: Docker Compose integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config --quiet
+      - run: docker compose up --build --wait --wait-timeout 120

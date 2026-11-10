@@ -1,25 +1,28 @@
 {
-	"private": true,
-    "name": "frontend",
-	"type": "module",
-	"scripts": {
-		"dev": "vite",
-		"build": "vite build",
-		"preview": "vite preview"
-	},
-	"dependencies": {
-		"preact": "^11.0.0",
-		"preact-iso": "^2.12.2",
-		"preact-render-to-string": "^6.8.2"
-	},
-	"devDependencies": {
-		"@preact/preset-vite": "^2.10.6",
-		"eslint": "^9.39.5",
-		"eslint-config-preact": "^2.0.0",
-		"typescript": "^7.0.2",
-		"vite": "^8.3.1"
-	},
-	"eslintConfig": {
-		"extends": "preact"
-	}
+  "private": true,
+  "name": "frontend",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "lint": "eslint src",
+    "format:check": "npx --yes prettier@3.6.2 --check src vite.config.ts index.html",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "preact": "^11.0.0",
+    "preact-iso": "^2.12.2",
+    "preact-render-to-string": "^6.8.2"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "eslint": "^9.39.5",
+    "eslint-config-preact": "^2.0.0",
+    "sass": "^1.108.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1"
+  },
+  "eslintConfig": {
+    "extends": "preact"
+  }
 }
