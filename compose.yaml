@@ -41,7 +41,8 @@ services:
 
   frontend:
     build:
-      context: ./apps/frontend
+      context: .
+      dockerfile: apps/frontend/Dockerfile
     depends_on:
       api:
         condition: service_healthy
