@@ -7,7 +7,7 @@
     "@nx/web": "24.0.5",
     "jiti": "2.4.2",
     "nx": "24.0.5",
-    "typescript": "~5.9.3",
+    "typescript": "~7.0.2",
     "vite": "^8.0.0"
   },
   "dependencies": {},
