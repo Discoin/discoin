@@ -10,6 +10,17 @@
   "enabledPlugins": {
     "nx@nx-claude-plugins": true
   },
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/*.p12)",
+      "Read(**/*.pfx)",
+      "Read(**/secrets/**)"
+    ]
+  },
   "sandbox": {
     "filesystem": {
       "allowRead": [

@@ -32,7 +32,11 @@ jobs:
       - run: npx nx run frontend:lint
       - run: npx nx run frontend:format-check
       - run: npx nx run frontend:typecheck
+      - run: npx nx run frontend:test
       - run: npx nx run frontend:build
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/frontend
+      - run: npx nx run frontend:e2e
 
   api:
     name: API lint, format, and lockfile
