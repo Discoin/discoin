@@ -1,7 +1,3 @@
-# Discoin/discoin
+# Discoin
 
-You probably meant to visit [discord/discoin](https://github.com/discord/discoin) but they forgot to change the links
-
-Check us out if you want
-
-p.s. We existed longer than them
+A stock exchange market for discord bots. Discoin is a platform that allows users to exchange one discord bot currency for another. It is designed to facilitate the trading of bot currencies in a secure and efficient manner.
