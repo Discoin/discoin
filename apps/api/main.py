@@ -25,7 +25,7 @@ def read_root() -> dict[str, str]:
     return {"name": "Discoin API"}
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def read_health(request: Request) -> dict[str, str]:
     with request.app.state.db_pool.connection() as connection:
         connection.execute("SELECT 1").fetchone()

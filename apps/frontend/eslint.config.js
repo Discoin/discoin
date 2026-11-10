@@ -1,7 +1,10 @@
+import tseslint from "typescript-eslint";
+
 export default [
   {
     files: ["**/*.{js,jsx,ts,tsx}"],
     languageOptions: {
+      parser: tseslint.parser,
       parserOptions: {
         ecmaVersion: "latest",
         sourceType: "module",
@@ -11,6 +14,7 @@ export default [
       },
       globals: {
         document: "readonly",
+        HTMLElement: "readonly",
         window: "readonly",
       },
     },

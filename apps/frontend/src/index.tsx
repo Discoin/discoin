@@ -26,9 +26,17 @@ export function App() {
 }
 
 if (typeof window !== "undefined") {
-  hydrate(<App />, document.getElementById("app"));
+  hydrate(<App />, getAppRoot());
 }
 
-export async function prerender(data) {
+function getAppRoot(): HTMLElement {
+  const root = document.getElementById("app");
+  if (root === null) {
+    throw new Error('Missing root element with id "app"');
+  }
+  return root;
+}
+
+export async function prerender(data: object) {
   return await ssr(<App {...data} />);
 }
