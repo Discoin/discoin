@@ -24,8 +24,5 @@
   },
   "overrides": {
     "immutable": "^5.1.10"
-  },
-  "eslintConfig": {
-    "extends": "preact"
   }
 }
