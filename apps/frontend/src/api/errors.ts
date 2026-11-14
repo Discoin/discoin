@@ -1,0 +1,21 @@
+export class ApiError extends Error {
+  readonly status: number;
+  readonly field: string | undefined;
+
+  constructor(status: number, message: string, field?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.field = field;
+  }
+}
+
+export class DailyCapError extends ApiError {
+  readonly maxAmount: number;
+
+  constructor(message: string, field: string, maxAmount: number) {
+    super(400, message, field);
+    this.name = "DailyCapError";
+    this.maxAmount = maxAmount;
+  }
+}

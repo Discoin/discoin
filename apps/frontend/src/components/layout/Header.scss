@@ -1,0 +1,102 @@
+.site-header {
+  background-color: var(--surface-raised);
+}
+
+.site-header__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3) var(--space-5);
+  max-width: 72rem;
+  box-sizing: border-box;
+  margin-inline: auto;
+  padding-block: var(--space-3);
+  padding-left: max(var(--space-4), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--space-4), env(safe-area-inset-right, 0px));
+}
+
+.site-header__brand {
+  color: var(--ink);
+  font-family: var(--font-figure);
+  font-stretch: 112.5%;
+  font-weight: 800;
+  font-size: var(--text-lg);
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+
+.site-header__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-right: auto;
+
+  a {
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-control);
+    color: var(--ink-muted);
+    font-size: var(--text-sm);
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.5rem;
+    font-weight: 600;
+    text-decoration: none;
+
+    &:hover {
+      color: var(--ink);
+      background-color: var(--surface-sunken);
+    }
+
+    &[aria-current="page"] {
+      color: var(--ink);
+      box-shadow: inset 0 -2px 0 var(--accent);
+    }
+  }
+}
+
+.site-header__ticker-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 2.75rem;
+  box-sizing: border-box;
+  padding-inline: var(--space-4);
+  border-block: 1px solid var(--line);
+  background-color: var(--surface-sunken);
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+
+  button {
+    min-height: 1.5rem;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+}
+
+@media (max-width: 56rem) {
+  .site-header__bar {
+    align-items: center;
+    column-gap: var(--space-3);
+  }
+
+  .site-header__bar > .theme-toggle {
+    order: 1;
+    margin-left: auto;
+  }
+
+  .site-header__bar > .account-menu {
+    order: 2;
+  }
+
+  .site-header__nav {
+    order: 3;
+    flex-basis: 100%;
+    margin-right: 0;
+  }
+}

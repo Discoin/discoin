@@ -1,0 +1,25 @@
+.notice {
+  --notice-color: var(--info);
+
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--notice-color);
+  border-left-width: 4px;
+  border-radius: var(--radius-panel);
+  background-color: var(--surface-raised);
+  font-size: var(--text-sm);
+}
+
+.notice__title {
+  font-weight: 700;
+  color: var(--notice-color);
+}
+
+.notice--error {
+  --notice-color: var(--down);
+}
+
+.notice--warning {
+  --notice-color: var(--accent);
+}

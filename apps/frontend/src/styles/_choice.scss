@@ -1,0 +1,76 @@
+@mixin choice-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 1.5rem;
+  cursor: pointer;
+
+  &:has(input:disabled) {
+    color: var(--ink-muted);
+    cursor: not-allowed;
+  }
+
+  &:hover input:not(:disabled, :checked, [aria-invalid="true"]) {
+    border-color: var(--ink-muted);
+  }
+}
+
+@mixin choice-input($radius) {
+  appearance: none;
+  display: grid;
+  flex: none;
+  place-content: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin: 0;
+  border: 2px solid var(--line-strong);
+  border-radius: $radius;
+  background-color: var(--surface-raised);
+  cursor: pointer;
+
+  &::before {
+    content: "";
+    transform: scale(0);
+  }
+
+  &:checked {
+    border-color: var(--accent);
+
+    &::before {
+      transform: scale(1);
+    }
+  }
+
+  &[aria-invalid="true"] {
+    border-color: var(--down);
+  }
+
+  &:focus-visible {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    box-shadow: var(--focus-ring);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    transition:
+      border-color 120ms ease-out,
+      background-color 120ms ease-out;
+
+    &::before {
+      transition: transform 120ms ease-out;
+    }
+  }
+
+  @media (forced-colors: active) {
+    appearance: auto;
+
+    &::before {
+      content: none;
+    }
+  }
+}

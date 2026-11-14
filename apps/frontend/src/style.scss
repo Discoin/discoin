@@ -1,16 +1,12 @@
-$text-color: #222;
-$dark-text-color: #ccc;
-$background-color: #fff;
-$dark-background-color: #1a1a1a;
-$header-color: #673ab8;
+@use "./styles/tokens";
 
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: var(--font-text);
+  font-size: 100%;
   line-height: 1.5;
   font-weight: 400;
-
-  color: $text-color;
-  background-color: $background-color;
+  color: var(--ink);
+  background-color: var(--surface-ground);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -21,6 +17,7 @@ $header-color: #673ab8;
 
 body {
   margin: 0;
+  background-color: var(--surface-ground);
 }
 
 #app {
@@ -29,46 +26,76 @@ body {
   min-height: 100vh;
 }
 
-header {
-  display: flex;
-  justify-content: flex-end;
-  background-color: $header-color;
-
-  nav {
-    display: flex;
-  }
-
-  a {
-    color: #fff;
-    padding: 0.75rem;
-    text-decoration: none;
-
-    &.active {
-      background-color: #0005;
-    }
-
-    &:hover {
-      background-color: #0008;
-    }
-  }
-}
-
 main {
   flex: auto;
-  display: flex;
-  align-items: center;
-  max-width: 1280px;
-  margin: 0 auto;
-  text-align: center;
+  width: 100%;
+  box-sizing: border-box;
+  max-width: 72rem;
+  margin-inline: auto;
+  padding-block: var(--space-6);
+  padding-left: max(var(--space-4), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--space-4), env(safe-area-inset-right, 0px));
+}
 
-  @media (max-width: 639px) {
-    margin: 2rem;
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+main:focus-visible {
+  box-shadow: none;
+}
+
+::placeholder {
+  color: var(--ink-muted);
+  opacity: 1;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skip-link {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 10;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-control);
+  background-color: var(--surface-raised);
+  color: var(--ink);
+  font-weight: 600;
+  transform: translateY(-200%);
+
+  &:focus-visible {
+    transform: none;
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: $dark-text-color;
-    background-color: $dark-background-color;
-  }
+.figure {
+  font-family: var(--font-figure);
+  font-variant-numeric: tabular-nums;
+  font-stretch: 87.5%;
 }

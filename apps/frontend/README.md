@@ -1,15 +1,22 @@
-# `create-preact`
+# Discoin dashboard
 
-<h2 align="center">
-  <img height="256" width="256" src="./src/assets/preact.svg">
-</h2>
+Preact and Vite. Run tasks through nx from the repo root, like `npx nx run frontend:dev`.
 
-<h3 align="center">Get started using Preact and Vite!</h3>
+## Picking the API
 
-## Getting Started
+Every Vite command needs `--mode http` or `--mode mock`, and the app refuses to load with any other mode.
 
--   `npm run dev` - Starts a dev server at http://localhost:5173/
+- `http` talks to the real API at `/api`. The dev and preview servers proxy `/api` to `http://localhost:8000`, and nginx does the same in Docker.
+- `mock` uses the in-memory API in `src/mocks`, which follows the same contract.
 
--   `npm run build` - Builds for production, emitting to `dist/`. Prerenders all found routes in app to static HTML
+| Script | Mode | What it does |
+| --- | --- | --- |
+| `dev` | mock | Dev server at http://localhost:5173 |
+| `dev:http` | http | Dev server against a local API |
+| `build` | http | Production build into `dist/`, with prerendered routes |
+| `build:mock`, `preview:mock` | mock | Build into `dist-mock/` and serve it, for the e2e tests |
+| `test` | mock | Unit tests |
+| `e2e` | mock | Playwright, including axe, alignment and reflow checks |
+| `smoke` | http | Playwright against a running stack. Set `SMOKE_URL`, like `http://127.0.0.1:4080` |
 
--   `npm run preview` - Starts a server at http://localhost:4173/ to test production build locally
+For the real API locally, start the API (`npx nx run api:serve`) with `FRONTEND_URL=http://localhost:5173/`, then `npx nx run frontend:dev:http`.

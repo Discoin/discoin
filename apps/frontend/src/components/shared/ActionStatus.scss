@@ -1,0 +1,11 @@
+.action-status {
+  font-size: var(--text-sm);
+
+  &:empty {
+    display: none;
+  }
+}
+
+.action-status--failed {
+  color: var(--down);
+}

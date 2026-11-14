@@ -1,0 +1,8 @@
+.loadable__loading {
+  padding: var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background-color: var(--surface-raised);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}

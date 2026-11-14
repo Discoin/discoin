@@ -1,0 +1,26 @@
+@use "sass:math";
+
+$logo-size: 460;
+$mark-top: 49;
+$mark-left: 57;
+$mark-width: 318;
+$mark-height: 342;
+$ascender-height: 0.89em;
+$px-to-ascender: math.div($ascender-height, $mark-height);
+
+.wordmark__d {
+  display: inline-block;
+  overflow: hidden;
+  width: $mark-width * $px-to-ascender;
+  height: $ascender-height;
+  margin-inline-end: 0.04em;
+
+  img {
+    display: block;
+    width: $logo-size * $px-to-ascender;
+    max-width: none;
+    height: auto;
+    margin-top: -$mark-top * $px-to-ascender;
+    margin-left: -$mark-left * $px-to-ascender;
+  }
+}

@@ -1,0 +1,22 @@
+.currency-link {
+  display: inline-flex;
+  min-height: 1.5rem;
+  border-radius: var(--radius-tag);
+  color: var(--ink);
+  text-decoration: none;
+
+  &:hover .currency-tag__name {
+    text-decoration: underline;
+  }
+}
+
+.data-table tr:has(.currency-link) {
+  position: relative;
+  cursor: pointer;
+
+  .currency-link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+}

@@ -18,20 +18,28 @@ export default [
         window: "readonly",
       },
     },
+    plugins: {
+      "@typescript-eslint": tseslint.plugin,
+    },
     rules: {
       "no-constant-condition": "error",
       "no-const-assign": "error",
       "no-dupe-keys": "error",
       "no-duplicate-imports": "error",
-      "no-undef": "error",
       "no-unreachable": "error",
-      "no-unused-vars": [
+      "@typescript-eslint/no-unused-vars": [
         "error",
         {
           argsIgnorePattern: "^_",
           varsIgnorePattern: "^[A-Z]",
         },
       ],
+    },
+  },
+  {
+    files: ["**/*.{js,jsx}"],
+    rules: {
+      "no-undef": "error",
     },
   },
 ];

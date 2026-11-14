@@ -14,7 +14,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run build && npm run preview -- --strictPort",
+    command: "npm run build:mock && npm run preview:mock -- --strictPort",
     url: PREVIEW_URL,
   },
 });

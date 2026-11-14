@@ -1,0 +1,26 @@
+.price-change {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.375em;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.price-change--up {
+  color: var(--up);
+}
+
+.price-change--down {
+  color: var(--down);
+}
+
+.price-change--flat {
+  color: var(--neutral);
+}
+
+.price-change__glyph {
+  align-self: center;
+  font-family: var(--font-text);
+  font-size: 0.75em;
+  line-height: 1;
+}

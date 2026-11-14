@@ -1,0 +1,21 @@
+.reversal-review {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.reversal-review__title {
+  font-size: var(--text-md);
+  font-weight: 700;
+}
+
+.reversal-review__count {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.reversal-review__total {
+  color: var(--ink);
+  font-size: var(--text-xl);
+  font-weight: 700;
+}

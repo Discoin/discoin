@@ -1,0 +1,16 @@
+.confirm-button {
+  display: flex;
+  min-width: min(16rem, 70vw);
+  white-space: normal;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--down);
+  border-radius: var(--radius-panel);
+  font-size: var(--text-sm);
+
+  p {
+    flex-basis: 100%;
+  }
+}

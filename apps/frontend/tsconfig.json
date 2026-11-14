@@ -19,5 +19,5 @@
 		}
 	},
 	"include": ["**/*"],
-	"exclude": ["node_modules", "dist", "playwright-report", "test-results"]
+	"exclude": ["node_modules", "dist", "dist-mock", "playwright-report", "test-results"]
 }

@@ -1,0 +1,85 @@
+@mixin light-palette {
+  --surface-ground: #eef1f5;
+  --surface-raised: #ffffff;
+  --surface-sunken: #e1e6ed;
+  --line: #c6cfdb;
+  --line-strong: #798392;
+  --ink: #0f1a28;
+  --ink-muted: #4c5b70;
+  --accent: #955500;
+  --accent-ink: #ffffff;
+  --accent-soft: #f6e6cf;
+  --up: #0d7546;
+  --down: #c02637;
+  --info: #1d5bbf;
+  --neutral: #586678;
+  --chart-1: #955500;
+  --chart-2: #1d5bbf;
+  --chart-3: #0d7546;
+  --chart-4: #8b3fb5;
+  color-scheme: light;
+}
+
+@mixin dark-palette {
+  --surface-ground: #0b1420;
+  --surface-raised: #111d2c;
+  --surface-sunken: #070e17;
+  --line: #213149;
+  --line-strong: #576a85;
+  --ink: #dde6f0;
+  --ink-muted: #8a9bb2;
+  --accent: #f2a93b;
+  --accent-ink: #1b1103;
+  --accent-soft: #33260f;
+  --up: #43d293;
+  --down: #ff7380;
+  --info: #72aeff;
+  --neutral: #8a9bb2;
+  --chart-1: #f2a93b;
+  --chart-2: #72aeff;
+  --chart-3: #43d293;
+  --chart-4: #c99bf0;
+  color-scheme: dark;
+}
+
+:root {
+  @include light-palette;
+
+  --font-text: "Instrument Sans Variable", system-ui, sans-serif;
+  --font-figure:
+    "Martian Mono Variable", ui-monospace, "Cascadia Mono", monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5625rem;
+  --text-2xl: 1.9375rem;
+  --text-3xl: 2.4375rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
+
+  --radius-tag: 3px;
+  --radius-control: 6px;
+  --radius-panel: 8px;
+  --radius-pill: 999px;
+
+  --focus-ring: 0 0 0 2px var(--surface-ground), 0 0 0 4px var(--accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    @include dark-palette;
+  }
+}
+
+:root[data-theme="dark"] {
+  @include dark-palette;
+}
