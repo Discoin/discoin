@@ -6,6 +6,7 @@ import {
   openAdminReversalReview,
   openOwnerReversalReview,
   openPage,
+  startWithEveryCurrencyInactive,
 } from "./support.js";
 
 const PAGES = [
@@ -18,6 +19,16 @@ const PAGES = [
 ];
 const THEMES = ["light", "dark"] as const;
 
+async function expectWcagCompliance(page: Page): Promise<void> {
+  await page.evaluate(() => document.fonts.ready);
+
+  const results = await new AxeBuilder({ page })
+    .withTags(WCAG_22_AA_TAGS)
+    .analyze();
+
+  expect(results.violations).toEqual([]);
+}
+
 for (const { path } of PAGES) {
   for (const theme of THEMES) {
     test(`${path} meets WCAG 2.2 AA in the ${theme} theme`, async ({
@@ -25,15 +36,22 @@ for (const { path } of PAGES) {
     }) => {
       await page.emulateMedia({ colorScheme: theme });
       await openPage(page, path);
-      await page.evaluate(() => document.fonts.ready);
 
-      const results = await new AxeBuilder({ page })
-        .withTags(WCAG_22_AA_TAGS)
-        .analyze();
-
-      expect(results.violations).toEqual([]);
+      await expectWcagCompliance(page);
     });
   }
+}
+
+for (const theme of THEMES) {
+  test(`/ with no active currencies meets WCAG 2.2 AA in the ${theme} theme`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: theme });
+    await startWithEveryCurrencyInactive(page);
+    await openPage(page, "/");
+
+    await expectWcagCompliance(page);
+  });
 }
 
 test("the first Tab reaches the skip link, which moves focus to the content", async ({
@@ -168,11 +186,7 @@ for (const step of DIALOG_STEPS) {
       await step.open(page);
       await expect(page.getByRole("dialog")).toBeVisible();
 
-      const results = await new AxeBuilder({ page })
-        .withTags(WCAG_22_AA_TAGS)
-        .analyze();
-
-      expect(results.violations).toEqual([]);
+      await expectWcagCompliance(page);
     });
   }
 

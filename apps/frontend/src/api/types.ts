@@ -93,6 +93,7 @@ export interface CurrentUser {
   userId: string;
   username: string | null;
   avatarUrl: string;
+  defaultAvatarUrl: string;
   isAdmin: boolean;
   ownedCurrencyIds: string[];
 }

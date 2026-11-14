@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter
 
-from app.auth.avatars import avatar_url
+from app.auth.avatars import avatar_url, default_avatar_url
 from app.auth.sessions import LoggedInUser
 from app.core.database import Database
 from app.core.models import CamelModel
@@ -16,6 +16,7 @@ class Me(CamelModel):
     user_id: str
     username: str | None
     avatar_url: str
+    default_avatar_url: str
     is_admin: bool
     owned_currency_ids: list[UUID]
 
@@ -28,6 +29,7 @@ def get_me(user: LoggedInUser, db: Database) -> Me:
         user_id=user.id,
         username=user.username,
         avatar_url=avatar_url(user.id, user.avatar_hash),
+        default_avatar_url=default_avatar_url(user.id),
         is_admin=user.is_admin,
         owned_currency_ids=[row["id"] for row in rows],
     )

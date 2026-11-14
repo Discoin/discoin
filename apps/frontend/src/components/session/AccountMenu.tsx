@@ -52,6 +52,21 @@ function AccountPanel({ id, user, onLoggedOut }: AccountPanelProps) {
   );
 }
 
+function Avatar({ user }: { user: CurrentUser }) {
+  const [failed, setFailed] = useState(false);
+
+  return (
+    <img
+      class="account-menu__avatar"
+      src={failed ? user.defaultAvatarUrl : user.avatarUrl}
+      alt=""
+      width="28"
+      height="28"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function SignedInMenu({ user }: { user: CurrentUser }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -87,13 +102,7 @@ function SignedInMenu({ user }: { user: CurrentUser }) {
         aria-controls={panelId}
         onClick={() => setOpen(!open)}
       >
-        <img
-          class="account-menu__avatar"
-          src={user.avatarUrl}
-          alt=""
-          width="28"
-          height="28"
-        />
+        <Avatar user={user} />
         <span class="visually-hidden">Account: {displayName(user)}</span>
       </button>
       {open && (

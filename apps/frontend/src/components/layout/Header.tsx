@@ -1,6 +1,6 @@
 import { useLocation } from "preact-iso";
 import { api } from "../../api/client.js";
-import type { CurrentUser } from "../../api/types.js";
+import type { Currency, CurrentUser } from "../../api/types.js";
 import { AccountMenu } from "../session/AccountMenu.jsx";
 import { useCurrentUser } from "../session/SessionProvider.jsx";
 import { useRequest } from "../../lib/useRequest.js";
@@ -30,11 +30,17 @@ const LINKS: NavLink[] = [
   { href: "/admin", label: "Admin", shownTo: (user) => user?.isAdmin === true },
 ];
 
+function ReadyTicker({ currencies }: { currencies: Currency[] }) {
+  if (currencies.length === 0) return null;
+
+  return <Ticker currencies={currencies} />;
+}
+
 function PriceTicker() {
   const request = useRequest(() => api.listCurrencies(), []);
   const { state } = request;
 
-  if (state.status === "ready") return <Ticker currencies={state.data} />;
+  if (state.status === "ready") return <ReadyTicker currencies={state.data} />;
 
   return (
     <div class="site-header__ticker-note" role="status">

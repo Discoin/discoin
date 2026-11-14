@@ -1,7 +1,12 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { WCAG_22_AA_TAGS, openPage, waitForData } from "./support.js";
+import {
+  WCAG_22_AA_TAGS,
+  openPage,
+  startWithEveryCurrencyInactive,
+  waitForData,
+} from "./support.js";
 
 const THEMES = ["light", "dark"] as const;
 
@@ -26,6 +31,19 @@ test("the header shows who is logged in and every page they can open", async ({
   for (const label of ["My transactions", "Bot owner", "Admin"]) {
     await expect(nav.getByRole("link", { name: label })).toBeVisible();
   }
+});
+
+test("with no active currencies the avatar still shows and nothing crashes", async ({
+  page,
+}) => {
+  const pageErrors: Error[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error));
+  await startWithEveryCurrencyInactive(page);
+  await openPage(page, "/");
+
+  await expect(accountButton(page)).toBeVisible();
+  await expect(page.locator(".ticker")).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
 });
 
 test("logging out hides the pages that need a login", async ({ page }) => {

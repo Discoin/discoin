@@ -38,6 +38,7 @@ import {
   sampleTransactions,
   sampleWeeklyMedians,
 } from "./data.js";
+import { marketStartsInactive } from "./inactiveMarket.js";
 import {
   adminReversalFilter,
   ownerReversalFilter,
@@ -76,6 +77,18 @@ interface MockState {
 }
 
 function initialState(): MockState {
+  const state = sampleState();
+  if (marketStartsInactive()) {
+    state.currencies = state.currencies.map((found) => ({
+      ...found,
+      active: false,
+    }));
+  }
+
+  return state;
+}
+
+function sampleState(): MockState {
   return structuredClone({
     currencies: sampleCurrencies,
     histories: sampleReserveHistories,
@@ -478,6 +491,7 @@ export function createMockApi(): DiscoinApi {
       userId,
       username,
       avatarUrl: SAMPLE_AVATAR,
+      defaultAvatarUrl: SAMPLE_AVATAR,
       isAdmin: true,
       ownedCurrencyIds,
     };

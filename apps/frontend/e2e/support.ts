@@ -1,5 +1,7 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
+import { INACTIVE_MARKET_KEY } from "../src/mocks/inactiveMarket.js";
+
 export const WCAG_22_AA_TAGS = [
   "wcag2a",
   "wcag2aa",
@@ -49,6 +51,14 @@ export async function openOwnerReversalReview(page: Page): Promise<void> {
   await dialog.getByLabel("Both", { exact: true }).check();
   await reviewReversal(dialog);
   await expect(reversalTable(page)).toBeVisible();
+}
+
+export async function startWithEveryCurrencyInactive(
+  page: Page,
+): Promise<void> {
+  await page.addInitScript((key) => {
+    sessionStorage.setItem(key, "true");
+  }, INACTIVE_MARKET_KEY);
 }
 
 export async function openPage(page: Page, path: string): Promise<void> {

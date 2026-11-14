@@ -76,6 +76,7 @@ def test_callback_logs_the_user_in(client: TestClient, connection: psycopg.Conne
         "userId": USER_ID,
         "username": "Trader Joe",
         "avatarUrl": f"https://cdn.discordapp.com/avatars/{USER_ID}/abc123.png?size=64",
+        "defaultAvatarUrl": f"https://cdn.discordapp.com/embed/avatars/{(int(USER_ID) >> 22) % 6}.png",
         "isAdmin": False,
         "ownedCurrencyIds": [],
     }
