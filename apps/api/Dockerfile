@@ -14,7 +14,8 @@ RUN apt-get update \
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
 
-COPY main.py ./
+COPY app ./app
+COPY migrations ./migrations
 
 RUN useradd --create-home --uid 10001 app \
     && chown -R app:app /app
@@ -23,4 +24,4 @@ USER app
 
 EXPOSE 8000
 
-CMD ["/app/.venv/bin/uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/.venv/bin/uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--root-path", "/api", "--no-access-log"]

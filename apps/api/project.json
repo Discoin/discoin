@@ -1,0 +1,49 @@
+{
+  "name": "api",
+  "targets": {
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "uv run ruff check",
+        "cwd": "apps/api"
+      }
+    },
+    "format-check": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "uv run ruff format --check",
+        "cwd": "apps/api"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "uv run pytest",
+        "cwd": "apps/api"
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "command": "uv run uvicorn app.main:create_app --factory --reload --no-access-log",
+        "cwd": "apps/api"
+      }
+    },
+    "seed": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "uv run python -m app.currencies.seed",
+        "cwd": "apps/api"
+      }
+    },
+    "worker": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "command": "uv run python -m app.webhooks.worker",
+        "cwd": "apps/api"
+      }
+    }
+  }
+}
