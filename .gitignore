@@ -10,3 +10,7 @@
 vite.config.*.timestamp*
 
 node_modules/
+
+# Python
+__pycache__/
+.env

@@ -21,11 +21,15 @@ services:
       context: ./apps/api
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-discoin}:${POSTGRES_PASSWORD:-discoin}@db:5432/${POSTGRES_DB:-discoin}
+      FIRST_ADMIN_ID: ${FIRST_ADMIN_ID:?Set FIRST_ADMIN_ID in .env to the Discord user ID of the first admin}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?Set DISCORD_CLIENT_ID in .env from the Discord developer portal}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:?Set DISCORD_CLIENT_SECRET in .env from the Discord developer portal}
+      DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI:?Set DISCORD_REDIRECT_URI in .env to the API login callback URL}
+      FRONTEND_URL: ${FRONTEND_URL:?Set FRONTEND_URL in .env to where the dashboard is served}
+      WEBHOOK_SECRET_KEY: ${WEBHOOK_SECRET_KEY:?Set WEBHOOK_SECRET_KEY in .env to 32 random bytes in base64}
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "8000:8000"
     healthcheck:
       test:
         - CMD
@@ -39,6 +43,20 @@ services:
       retries: 5
       start_period: 5s
 
+  worker:
+    build:
+      context: ./apps/api
+    command:
+      - /app/.venv/bin/python
+      - -m
+      - app.webhooks.worker
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-discoin}:${POSTGRES_PASSWORD:-discoin}@db:5432/${POSTGRES_DB:-discoin}
+      WEBHOOK_SECRET_KEY: ${WEBHOOK_SECRET_KEY:?Set WEBHOOK_SECRET_KEY in .env to 32 random bytes in base64}
+    depends_on:
+      api:
+        condition: service_healthy
+
   frontend:
     build:
       context: .
@@ -47,7 +65,7 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "8080:80"
+      - "4080:80"
     healthcheck:
       test:
         - CMD

@@ -39,26 +39,38 @@ jobs:
       - run: npx nx run frontend:e2e
 
   api:
-    name: API lint, format, and lockfile
+    name: API lint, format, lockfile, and tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_DB: discoin
+          POSTGRES_USER: discoin
+          POSTGRES_PASSWORD: discoin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U discoin -d discoin"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://discoin:discoin@localhost:5432/discoin
+    defaults:
+      run:
+        working-directory: apps/api
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.15"
       - uses: astral-sh/setup-uv@v7
-      - uses: astral-sh/ruff-action@v3
-        with:
-          src: apps/api
-          args: check
-      - uses: astral-sh/ruff-action@v3
-        with:
-          src: apps/api
-          args: format --check
       - run: uv lock --check
-        working-directory: apps/api
-      - run: python -m py_compile main.py
-        working-directory: apps/api
+      - run: uv sync --locked
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run pytest
 
   security:
     name: Dependency security audit
@@ -80,9 +92,30 @@ jobs:
       - run: uvx pip-audit --requirement /tmp/api-requirements.txt
 
   docker:
-    name: Docker Compose integration
+    name: Docker Compose integration and real API smoke test
     runs-on: ubuntu-latest
+    env:
+      FIRST_ADMIN_ID: "100000000000000001"
+      DISCORD_CLIENT_ID: ci-client
+      DISCORD_CLIENT_SECRET: ci-secret
+      DISCORD_REDIRECT_URI: http://localhost:4080/api/auth/discord/callback
+      FRONTEND_URL: http://localhost:4080/
+      WEBHOOK_SECRET_KEY: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+      SMOKE_URL: http://127.0.0.1:4080
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            apps/frontend/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix apps/frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/frontend
       - run: docker compose config --quiet
-      - run: docker compose up --build --wait --wait-timeout 120
+      - run: docker compose up --build --wait --wait-timeout 180
+      - run: docker compose exec -T -e SEED_OWNER_ID=200000000000000002 api /app/.venv/bin/python -m app.currencies.seed
+      - run: npx nx run frontend:smoke
