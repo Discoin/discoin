@@ -56,7 +56,7 @@ test("adding a currency shows a toast", async ({ page }) => {
   await dialog.getByLabel("Abbreviation").fill("SHL");
   await dialog.getByLabel("Weekly income median").fill("50000");
   await dialog
-    .getByLabel("Bot owner's Discord user ID")
+    .getByLabel("Owner ID")
     .fill("412358906715234305");
   await dialog.getByRole("button", { name: "Add currency" }).click();
 

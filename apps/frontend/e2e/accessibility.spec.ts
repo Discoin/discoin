@@ -149,7 +149,7 @@ const DIALOG_STEPS = [
       await page.getByRole("button", { name: "Edit OAT" }).click();
       const dialog = page.getByRole("dialog");
       await dialog
-        .getByLabel("Owner's Discord user ID")
+        .getByLabel("Owner ID")
         .fill("305918264730192845");
       await dialog.getByLabel("Weekly income median").fill("300000");
       await dialog.getByRole("button", { name: "Review changes" }).click();

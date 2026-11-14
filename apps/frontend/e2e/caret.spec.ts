@@ -20,7 +20,7 @@ const ID_FIELDS = [
     open: async (page: Page) => {
       await page.getByRole("button", { name: "Add currency" }).click();
 
-      return page.getByRole("dialog").getByLabel("Bot owner's Discord user ID");
+      return page.getByRole("dialog").getByLabel("Owner ID");
     },
   },
   {
@@ -30,7 +30,7 @@ const ID_FIELDS = [
       await page.getByRole("button", { name: "Edit OAT" }).click();
       const field = page
         .getByRole("dialog")
-        .getByLabel("Owner's Discord user ID");
+        .getByLabel("Owner ID");
       await field.fill("");
 
       return field;

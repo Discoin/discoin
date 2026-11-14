@@ -101,7 +101,7 @@ export function EditCurrencyForm({
       {step === "edit" ? (
         <>
           <Field
-            label="Owner's Discord user ID"
+            label="Owner ID"
             inputMode="numeric"
             autoComplete="off"
             value={ownerText}

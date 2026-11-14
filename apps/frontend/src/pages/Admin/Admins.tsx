@@ -73,7 +73,7 @@ function AdminsEditor({ admins, onChange }: AdminsEditorProps) {
             {admins.map((admin) => (
               <tr key={admin.userId}>
                 <td>{nameOf(admin)}</td>
-                <td class="data-table__number">{admin.userId}</td>
+                <td>{admin.userId}</td>
                 <td>
                   <ConfirmButton
                     label={

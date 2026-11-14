@@ -78,7 +78,7 @@ export function AddCurrencyForm({ onAdded, onCancel }: AddCurrencyFormProps) {
         onInput={(event) => setMedianText(event.currentTarget.value)}
       />
       <Field
-        label="Bot owner's Discord user ID"
+        label="Owner ID"
         inputMode="numeric"
         autoComplete="off"
         value={ownerId}
