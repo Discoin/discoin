@@ -8,6 +8,19 @@ import { PriceChange } from "../../components/currency/PriceChange.jsx";
 import { Sparkline } from "./Sparkline.jsx";
 import "../../components/shared/DataTable.scss";
 
+const SPARKLINE_MIN_VALUES = 2;
+
+function ValueTrend({ currency }: { currency: Currency }) {
+  if (currency.valueHistory.length < SPARKLINE_MIN_VALUES) return <>New</>;
+
+  return (
+    <Sparkline
+      values={currency.valueHistory}
+      label={`${currency.name} value over 7 days`}
+    />
+  );
+}
+
 export function CurrencyTable({ currencies }: { currencies: Currency[] }) {
   return (
     <TableFrame label="Currencies">
@@ -47,10 +60,7 @@ export function CurrencyTable({ currencies }: { currencies: Currency[] }) {
                 />
               </td>
               <td class="data-table__graphic">
-                <Sparkline
-                  values={currency.valueHistory}
-                  label={`${currency.name} value over 7 days`}
-                />
+                <ValueTrend currency={currency} />
               </td>
             </tr>
           ))}
