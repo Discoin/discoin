@@ -51,12 +51,14 @@ test("checking a box and picking a radio still works from the keyboard", async (
   await page.keyboard.press("Space");
   await expect(checkbox).toBeChecked();
 
-  const incoming = dialog.getByLabel("Incoming (into your currency)");
+  const incoming = dialog.getByLabel(
+    "Incoming (into any of your bot's currencies)",
+  );
   await incoming.focus();
   await page.keyboard.press("Space");
   await expect(incoming).toBeChecked();
   await page.keyboard.press("ArrowDown");
   await expect(
-    dialog.getByLabel("Outgoing (out of your currency)"),
+    dialog.getByLabel("Outgoing (out of any of your bot's currencies)"),
   ).toBeChecked();
 });

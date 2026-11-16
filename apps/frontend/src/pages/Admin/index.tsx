@@ -1,6 +1,6 @@
-import { useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import { api } from "../../api/client.js";
-import type { AdminCurrency } from "../../api/types.js";
+import type { AdminBot, AdminCurrency } from "../../api/types.js";
 import { BlockedUsers } from "../../components/blocking/BlockedUsers.jsx";
 import { RequireLogin } from "../../components/session/RequireLogin.jsx";
 import { Button } from "../../components/shared/Button.jsx";
@@ -16,22 +16,50 @@ import { formatAmount, formatValue } from "../../lib/format.js";
 import { usePageTitle } from "../../lib/usePageTitle.js";
 import { useRequest } from "../../lib/useRequest.js";
 import { Admins } from "./Admins.jsx";
+import { Bots } from "./Bots.jsx";
 import { AddCurrencyForm } from "./CurrencyForms.jsx";
 import { EditCurrencyForm } from "./EditCurrencyForm.jsx";
+import { RemovalDialog } from "./RemovalDialog.jsx";
+import { EditButton, RemoveButton } from "./RowButtons.jsx";
+import { useFocusAfterClose } from "./useFocusAfterClose.js";
 import "../../components/shared/DataTable.scss";
 import "./style.scss";
 
 type OpenDialog =
   | { kind: "closed" }
   | { kind: "add" }
-  | { kind: "edit"; currencyId: string };
+  | { kind: "edit"; entry: AdminCurrency }
+  | { kind: "remove"; entry: AdminCurrency };
+
+interface AdminData {
+  currencies: AdminCurrency[];
+  bots: AdminBot[];
+}
+
+async function loadAdminData(): Promise<AdminData> {
+  const [currencies, bots] = await Promise.all([
+    api.listAdminCurrencies(),
+    api.listAdminBots(),
+  ]);
+
+  return { currencies, bots };
+}
+
+function labelOf({ currency }: AdminCurrency): string {
+  return `${currency.name} (${currency.abbreviation})`;
+}
 
 interface CurrencyOverviewProps {
   currencies: AdminCurrency[];
-  onEdit: (currencyId: string) => void;
+  onEdit: (entry: AdminCurrency) => void;
+  onRemove: (entry: AdminCurrency) => void;
 }
 
-function CurrencyOverview({ currencies, onEdit }: CurrencyOverviewProps) {
+function CurrencyOverview({
+  currencies,
+  onEdit,
+  onRemove,
+}: CurrencyOverviewProps) {
   return (
     <TableFrame label="All currencies">
       <table class="data-table">
@@ -40,7 +68,9 @@ function CurrencyOverview({ currencies, onEdit }: CurrencyOverviewProps) {
           <tr>
             <th scope="col">Currency</th>
             <th scope="col">Edit</th>
+            <th scope="col">Remove</th>
             <th scope="col">Status</th>
+            <th scope="col">Bot</th>
             <th scope="col" class="data-table__number">
               Value
             </th>
@@ -50,91 +80,94 @@ function CurrencyOverview({ currencies, onEdit }: CurrencyOverviewProps) {
             <th scope="col" class="data-table__number">
               Weekly median
             </th>
-            <th scope="col" class="data-table__number">
-              Owner
-            </th>
           </tr>
         </thead>
         <tbody>
-          {currencies.map(({ currency, weeklyMedian, ownerId }) => (
-            <tr key={currency.id}>
-              <td>
-                <CurrencyTag currency={currency} />
-              </td>
-              <td>
-                <Button variant="outline" onClick={() => onEdit(currency.id)}>
-                  <span>
-                    <svg
-                      class="admin__pencil"
-                      viewBox="0 0 16 16"
-                      width="14"
-                      height="14"
-                      aria-hidden="true"
-                    >
-                      <path d="M11 2.5l2.5 2.5L5.5 13H3v-2.5z" />
-                    </svg>
-                    Edit
+          {currencies.map((entry) => {
+            const { currency, weeklyMedian, bot } = entry;
+
+            return (
+              <tr key={currency.id}>
+                <td>
+                  <CurrencyTag currency={currency} />
+                </td>
+                <td>
+                  <EditButton
+                    subject={currency.abbreviation}
+                    onClick={() => onEdit(entry)}
+                  />
+                </td>
+                <td>
+                  <RemoveButton
+                    subject={currency.abbreviation}
+                    onClick={() => onRemove(entry)}
+                  />
+                </td>
+                <td>
+                  <span class="admin__status">
+                    {currency.active ? "Active" : "Inactive"}
                   </span>
-                  <span class="visually-hidden"> {currency.abbreviation}</span>
-                </Button>
-              </td>
-              <td>
-                <span class="admin__status">
-                  {currency.active ? "Active" : "Inactive"}
-                </span>
-              </td>
-              <td class="data-table__number">
-                {formatValue(currencyValue(currency.reserve))}
-              </td>
-              <td class="data-table__number">
-                {formatAmount(currency.reserve)}
-              </td>
-              <td class="data-table__number">{formatAmount(weeklyMedian)}</td>
-              <td class="data-table__number">{ownerId}</td>
-            </tr>
-          ))}
+                </td>
+                <td>
+                  {bot === null ? (
+                    <span class="admin__status">No bot</span>
+                  ) : (
+                    bot.name
+                  )}
+                </td>
+                <td class="data-table__number">
+                  {formatValue(currencyValue(currency.reserve))}
+                </td>
+                <td class="data-table__number">
+                  {formatAmount(currency.reserve)}
+                </td>
+                <td class="data-table__number">{formatAmount(weeklyMedian)}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </TableFrame>
   );
 }
 
-function replaced(
-  currencies: AdminCurrency[],
-  updated: AdminCurrency,
-): AdminCurrency[] {
-  return currencies.map((entry) =>
-    entry.currency.id === updated.currency.id ? updated : entry,
-  );
-}
-
-function findEntry(currencies: AdminCurrency[], id: string): AdminCurrency {
-  const entry = currencies.find((candidate) => candidate.currency.id === id);
-  if (entry === undefined) throw new Error(`Unknown currency "${id}"`);
-
-  return entry;
-}
-
 interface CurrencyEditorProps {
-  currencies: AdminCurrency[];
-  onChange: (currencies: AdminCurrency[]) => void;
+  data: AdminData;
+  onChange: () => Promise<void>;
 }
 
-function CurrencyEditor({ currencies, onChange }: CurrencyEditorProps) {
+function CurrencyEditor({ data, onChange }: CurrencyEditorProps) {
   const [dialog, setDialog] = useState<OpenDialog>({ kind: "closed" });
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const focusHeading = useFocusAfterClose(headingRef);
   const close = () => setDialog({ kind: "closed" });
+  const { currencies, bots } = data;
 
-  function finish(updated: AdminCurrency[]) {
-    onChange(updated);
+  async function finish() {
+    await onChange();
     close();
   }
 
+  async function finishRemoval() {
+    await finish();
+    focusHeading();
+  }
+
   return (
-    <Panel id="overview" title="All currencies">
+    <Panel id="overview" title="All currencies" headingRef={headingRef}>
       <div class="admin__toolbar">
-        <Button variant="primary" onClick={() => setDialog({ kind: "add" })}>
+        <Button
+          variant="primary"
+          disabled={bots.length === 0}
+          onClick={() => setDialog({ kind: "add" })}
+        >
           Add currency
         </Button>
+        {bots.length === 0 && (
+          <p class="edit-form__hint">
+            Add a bot first. Every currency needs one.
+          </p>
+        )}
       </div>
       {currencies.length === 0 ? (
         <EmptyState title="No currencies yet">
@@ -143,53 +176,38 @@ function CurrencyEditor({ currencies, onChange }: CurrencyEditorProps) {
       ) : (
         <CurrencyOverview
           currencies={currencies}
-          onEdit={(currencyId) => setDialog({ kind: "edit", currencyId })}
+          onEdit={(entry) => setDialog({ kind: "edit", entry })}
+          onRemove={(entry) => setDialog({ kind: "remove", entry })}
         />
       )}
       {dialog.kind === "add" && (
         <Dialog title="Add a currency" onClose={close}>
-          <AddCurrencyForm
-            onAdded={(added) => finish([...currencies, added])}
+          <AddCurrencyForm bots={bots} onAdded={finish} onCancel={close} />
+        </Dialog>
+      )}
+      {dialog.kind === "edit" && (
+        <Dialog title={`Edit ${labelOf(dialog.entry)}`} onClose={close}>
+          <EditCurrencyForm
+            entry={dialog.entry}
+            bots={bots}
+            onSaved={finish}
             onCancel={close}
           />
         </Dialog>
       )}
-      {dialog.kind === "edit" && (
-        <EditDialog
-          entry={findEntry(currencies, dialog.currencyId)}
-          onSaved={(updated) => finish(replaced(currencies, updated))}
+      {dialog.kind === "remove" && (
+        <RemovalDialog
+          subject={{
+            kind: "currency",
+            name: labelOf(dialog.entry),
+            preview: () => api.previewCurrencyRemoval(dialog.entry.currency.id),
+            remove: () => api.removeCurrency(dialog.entry.currency.id),
+          }}
+          onRemoved={finishRemoval}
           onClose={close}
         />
       )}
     </Panel>
-  );
-}
-
-interface EditDialogProps {
-  entry: AdminCurrency;
-  onSaved: (updated: AdminCurrency) => void;
-  onClose: () => void;
-}
-
-function EditDialog({ entry, onSaved, onClose }: EditDialogProps) {
-  const { name, abbreviation } = entry.currency;
-
-  return (
-    <Dialog title={`Edit ${name} (${abbreviation})`} onClose={onClose}>
-      <EditCurrencyForm entry={entry} onSaved={onSaved} onCancel={onClose} />
-    </Dialog>
-  );
-}
-
-function CurrencyAdmin() {
-  const request = useRequest(() => api.listAdminCurrencies(), []);
-
-  return (
-    <Loadable state={request.state} label="currencies" onRetry={request.reload}>
-      {(currencies) => (
-        <CurrencyEditor currencies={currencies} onChange={request.update} />
-      )}
-    </Loadable>
   );
 }
 
@@ -199,8 +217,8 @@ export function Admin() {
   return (
     <div class="page">
       <PageIntro title="Admin">
-        Add currencies, reset reserves and manage who can trade across all of
-        Discoin.
+        Register bots, add currencies, reset reserves and manage who can trade
+        across all of Discoin.
       </PageIntro>
       <RequireLogin access="admin">{() => <AdminWorkspace />}</RequireLogin>
     </div>
@@ -208,9 +226,32 @@ export function Admin() {
 }
 
 function AdminWorkspace() {
+  const request = useRequest(loadAdminData, []);
+
+  async function refresh() {
+    request.update(await loadAdminData());
+  }
+
   return (
     <>
-      <CurrencyAdmin />
+      <Loadable
+        state={request.state}
+        label="currencies and bots"
+        onRetry={request.reload}
+      >
+        {(data) => (
+          <>
+            <CurrencyEditor data={data} onChange={refresh} />
+            <Panel
+              id="bots"
+              title="Bots"
+              description="Each currency belongs to one bot, and the bot's owner manages it on the Bot owner page."
+            >
+              <Bots bots={data.bots} onChange={refresh} />
+            </Panel>
+          </>
+        )}
+      </Loadable>
       <Panel
         id="blocked"
         title="Blocked everywhere"

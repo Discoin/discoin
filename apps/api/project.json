@@ -26,7 +26,7 @@
       "executor": "nx:run-commands",
       "continuous": true,
       "options": {
-        "command": "uv run uvicorn app.main:create_app --factory --reload --no-access-log",
+        "command": "uv run uvicorn app.main:create_app --factory --reload --root-path /api --no-access-log",
         "cwd": "apps/api"
       }
     },

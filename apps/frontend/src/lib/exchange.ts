@@ -63,8 +63,9 @@ export function calculateRequiredAmount(
   return ceilToCents((reserves.from * payout) / (reserves.to - payout));
 }
 
-export const RESERVE_PER_WEEKLY_MEDIAN = 4;
-
-export function startingReserve(weeklyMedian: number): number {
-  return floorToCents(weeklyMedian * RESERVE_PER_WEEKLY_MEDIAN);
+export function startingReserve(
+  weeklyMedian: number,
+  multiplier: number,
+): number {
+  return floorToCents(weeklyMedian * multiplier);
 }

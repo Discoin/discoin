@@ -1,11 +1,16 @@
 import { createMockApi } from "../mocks/api.js";
 import { createHttpApi } from "./http.js";
 import type {
+  AdminBot,
   AdminCurrency,
   AdminUser,
   BlockedUser,
   BlockLevel,
   BlockResult,
+  BotChanges,
+  BotDetails,
+  BotSettings,
+  BotWithCurrencies,
   Currency,
   CurrencyChanges,
   CurrencyDetails,
@@ -14,8 +19,10 @@ import type {
   HistoryDays,
   NewCurrency,
   PendingTransaction,
+  RemovalPreview,
   ReservePoint,
   ReverseRequest,
+  SavedCurrency,
   Transaction,
 } from "./types.js";
 
@@ -37,7 +44,6 @@ export interface BlockListApi {
 
 export interface DiscoinApi {
   listCurrencies(): Promise<Currency[]>;
-  listAllCurrencies(): Promise<Currency[]>;
   getCurrency(abbreviation: string): Promise<Currency>;
   listCurrencyTransactions(currencyId: string): Promise<Transaction[]>;
   getReserveHistory(
@@ -55,29 +61,37 @@ export interface DiscoinApi {
   logout(): Promise<void>;
   listMyTransactions(): Promise<Transaction[]>;
 
-  listOwnedCurrencies(): Promise<Currency[]>;
+  listOwnedBots(): Promise<BotWithCurrencies[]>;
+  getBotSettings(botId: string): Promise<BotSettings>;
   getCurrencySettings(currencyId: string): Promise<CurrencySettings>;
   updateCurrencyDetails(
     currencyId: string,
     details: CurrencyDetails,
   ): Promise<Currency>;
-  regenerateApiToken(currencyId: string): Promise<string>;
-  generateWebhookSecret(currencyId: string): Promise<string>;
-  setWebhookUrl(currencyId: string, url: string): Promise<void>;
-  removeWebhookUrl(currencyId: string): Promise<void>;
-  testWebhook(currencyId: string): Promise<number>;
+  regenerateApiToken(botId: string): Promise<string>;
+  generateWebhookSecret(botId: string): Promise<string>;
+  setWebhookUrl(botId: string, url: string): Promise<void>;
+  removeWebhookUrl(botId: string): Promise<void>;
+  testWebhook(botId: string): Promise<number>;
   setDailyCap(currencyId: string, cap: number): Promise<void>;
   removeDailyCap(currencyId: string): Promise<void>;
-  listPendingTransactions(currencyId: string): Promise<PendingTransaction[]>;
+  listPendingTransactions(botId: string): Promise<PendingTransaction[]>;
   resendWebhook(transactionId: string): Promise<void>;
-  currencyBlocks(currencyId: string): BlockListApi;
+  botBlocks(botId: string): BlockListApi;
 
   listAdminCurrencies(): Promise<AdminCurrency[]>;
   addCurrency(currency: NewCurrency): Promise<AdminCurrency>;
   updateCurrency(
     currencyId: string,
     changes: CurrencyChanges,
-  ): Promise<AdminCurrency>;
+  ): Promise<SavedCurrency>;
+  previewCurrencyRemoval(currencyId: string): Promise<RemovalPreview>;
+  removeCurrency(currencyId: string): Promise<void>;
+  listAdminBots(): Promise<AdminBot[]>;
+  addBot(bot: BotDetails): Promise<AdminBot>;
+  updateBot(botId: string, changes: BotChanges): Promise<AdminBot>;
+  previewBotRemoval(botId: string): Promise<RemovalPreview>;
+  removeBot(botId: string): Promise<void>;
   globalBlocks: BlockListApi;
   listAdmins(): Promise<AdminUser[]>;
   grantAdmin(userId: string): Promise<AdminUser>;

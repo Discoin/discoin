@@ -7,17 +7,8 @@ import { usePageTitle } from "../../lib/usePageTitle.js";
 import { useRequest } from "../../lib/useRequest.js";
 import "../../components/layout/Panel.scss";
 
-async function loadMyTransactions() {
-  const [currencies, transactions] = await Promise.all([
-    api.listAllCurrencies(),
-    api.listMyTransactions(),
-  ]);
-
-  return { currencies, transactions };
-}
-
 function MyTransactionList() {
-  const request = useRequest(loadMyTransactions, []);
+  const request = useRequest(() => api.listMyTransactions(), []);
 
   return (
     <Loadable
@@ -25,7 +16,7 @@ function MyTransactionList() {
       label="your transactions"
       onRetry={request.reload}
       empty={{
-        when: (data) => data.transactions.length === 0,
+        when: (transactions) => transactions.length === 0,
         title: "No transactions yet",
         body: (
           <p>
@@ -35,11 +26,10 @@ function MyTransactionList() {
         ),
       }}
     >
-      {(data) => (
+      {(transactions) => (
         <TransactionTable
           caption="My transactions"
-          transactions={data.transactions}
-          currencies={data.currencies}
+          transactions={transactions}
         />
       )}
     </Loadable>

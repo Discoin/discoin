@@ -8,7 +8,8 @@
   display: grid;
   gap: var(--space-1);
 
-  h2 {
+  h2,
+  h3 {
     font-size: var(--text-xl);
     font-weight: 700;
   }
@@ -17,6 +18,7 @@
     max-width: 60ch;
     color: var(--ink-muted);
     font-size: var(--text-sm);
+    overflow-wrap: anywhere;
   }
 }
 
@@ -60,8 +62,4 @@
   display: grid;
   gap: var(--space-3);
   min-width: 0;
-}
-
-.picker {
-  max-width: 16rem;
 }

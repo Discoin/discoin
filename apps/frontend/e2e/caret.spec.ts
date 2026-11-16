@@ -15,22 +15,20 @@ test.use({ ...devices["Pixel 7"] });
 
 const ID_FIELDS = [
   {
-    name: "add currency owner",
+    name: "add bot owner",
     path: "/admin",
     open: async (page: Page) => {
-      await page.getByRole("button", { name: "Add currency" }).click();
+      await page.getByRole("button", { name: "Add bot" }).click();
 
       return page.getByRole("dialog").getByLabel("Owner ID");
     },
   },
   {
-    name: "edit currency owner",
+    name: "edit bot owner",
     path: "/admin",
     open: async (page: Page) => {
-      await page.getByRole("button", { name: "Edit OAT" }).click();
-      const field = page
-        .getByRole("dialog")
-        .getByLabel("Owner ID");
+      await page.getByRole("button", { name: "Edit Harvest bot" }).click();
+      const field = page.getByRole("dialog").getByLabel("Owner ID");
       await field.fill("");
 
       return field;

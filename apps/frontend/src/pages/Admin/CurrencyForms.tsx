@@ -1,40 +1,67 @@
 import { useState } from "preact/hooks";
 import { api } from "../../api/client.js";
-import type { AdminCurrency } from "../../api/types.js";
+import type { AdminBot, AdminCurrency } from "../../api/types.js";
 import { ActionStatus } from "../../components/shared/ActionStatus.jsx";
 import { Button } from "../../components/shared/Button.jsx";
 import { Field } from "../../components/shared/Field.jsx";
 import { parseAmount } from "../../lib/converter.js";
+import { currencyValue, startingReserve } from "../../lib/exchange.js";
 import {
-  RESERVE_PER_WEEKLY_MEDIAN,
-  currencyValue,
-  startingReserve,
-} from "../../lib/exchange.js";
-import { formatAmount, formatValue } from "../../lib/format.js";
+  formatAmount,
+  formatMultiplier,
+  formatValue,
+} from "../../lib/format.js";
 import { useAction } from "../../lib/useAction.js";
+import { BotSelect, NO_BOT_PICKED, pickedBot } from "./BotSelect.jsx";
 
-function reservePreview(medianText: string, abbreviation: string): string {
-  const median = parseAmount(medianText);
-  if (!(median > 0)) {
-    return `The reserve starts at ${RESERVE_PER_WEEKLY_MEDIAN} times the weekly median.`;
+const DEFAULT_RESERVE_MULTIPLIER = 10;
+export const RESERVE_TOO_SMALL =
+  "This median and multiplier give a reserve below 0.01. Raise one of them.";
+
+interface ReserveInput {
+  weeklyMedian: number;
+  multiplier: number;
+}
+
+function reservePreview(input: ReserveInput, abbreviation: string): string {
+  const { weeklyMedian, multiplier } = input;
+  if (!(multiplier > 0)) {
+    return "The reserve starts at the weekly median times the reserve multiplier.";
   }
 
-  const reserve = startingReserve(median);
+  if (!(weeklyMedian > 0)) {
+    return `The reserve starts at ${formatMultiplier(multiplier)} times the weekly median.`;
+  }
+
+  const reserve = startingReserve(weeklyMedian, multiplier);
+  if (!(reserve > 0)) return RESERVE_TOO_SMALL;
 
   return `The reserve starts at ${formatAmount(reserve)} ${abbreviation}, so one ${abbreviation} starts with a value of ${formatValue(currencyValue(reserve))}.`;
 }
 
 interface AddCurrencyFormProps {
-  onAdded: (added: AdminCurrency) => void;
+  bots: AdminBot[];
+  onAdded: (added: AdminCurrency) => Promise<void>;
   onCancel: () => void;
 }
 
-export function AddCurrencyForm({ onAdded, onCancel }: AddCurrencyFormProps) {
+export function AddCurrencyForm({
+  bots,
+  onAdded,
+  onCancel,
+}: AddCurrencyFormProps) {
   const [name, setName] = useState("");
   const [abbreviation, setAbbreviation] = useState("");
   const [medianText, setMedianText] = useState("");
-  const [ownerId, setOwnerId] = useState("");
+  const [multiplierText, setMultiplierText] = useState(
+    String(DEFAULT_RESERVE_MULTIPLIER),
+  );
+  const [botId, setBotId] = useState(NO_BOT_PICKED);
   const action = useAction();
+  const reserveInput = {
+    weeklyMedian: parseAmount(medianText),
+    multiplier: parseAmount(multiplierText),
+  };
 
   function add(event: Event) {
     event.preventDefault();
@@ -42,10 +69,10 @@ export function AddCurrencyForm({ onAdded, onCancel }: AddCurrencyFormProps) {
       const added = await api.addCurrency({
         name,
         abbreviation,
-        weeklyMedian: parseAmount(medianText),
-        ownerId,
+        ...reserveInput,
+        botId: pickedBot(botId),
       });
-      onAdded(added);
+      await onAdded(added);
 
       return `Added ${added.currency.name} (${added.currency.abbreviation}).`;
     });
@@ -73,18 +100,24 @@ export function AddCurrencyForm({ onAdded, onCancel }: AddCurrencyFormProps) {
         inputMode="decimal"
         autoComplete="off"
         value={medianText}
-        hint={reservePreview(medianText, abbreviation.trim().toUpperCase())}
+        hint={reservePreview(reserveInput, abbreviation.trim().toUpperCase())}
         error={action.fieldError("weeklyMedian")}
         onInput={(event) => setMedianText(event.currentTarget.value)}
       />
       <Field
-        label="Owner ID"
-        inputMode="numeric"
+        label="Reserve multiplier"
+        inputMode="decimal"
         autoComplete="off"
-        value={ownerId}
-        hint="The person who runs the bot, not the bot itself. They get the Bot owner page for this currency."
-        error={action.fieldError("ownerId")}
-        onInput={(event) => setOwnerId(event.currentTarget.value)}
+        value={multiplierText}
+        hint="The reserve starts at the weekly median times this."
+        error={action.fieldError("multiplier")}
+        onInput={(event) => setMultiplierText(event.currentTarget.value)}
+      />
+      <BotSelect
+        bots={bots}
+        value={botId}
+        error={action.fieldError("botId")}
+        onChange={setBotId}
       />
       <div class="form-actions">
         <Button
@@ -100,7 +133,13 @@ export function AddCurrencyForm({ onAdded, onCancel }: AddCurrencyFormProps) {
       </div>
       <ActionStatus
         state={action.state}
-        inlineFields={["name", "abbreviation", "weeklyMedian", "ownerId"]}
+        inlineFields={[
+          "name",
+          "abbreviation",
+          "weeklyMedian",
+          "multiplier",
+          "botId",
+        ]}
       />
     </form>
   );

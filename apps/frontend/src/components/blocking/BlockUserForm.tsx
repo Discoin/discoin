@@ -43,7 +43,7 @@ export function BlockUserForm({
   const action = useAction();
   const formRef = useRef<HTMLFormElement>(null);
   const pending = action.state.status === "pending";
-  const ownerBlock = blockList.level === "currency";
+  const ownerBlock = blockList.level === "bot";
 
   useEffect(() => {
     if (action.state.status !== "failed") return;

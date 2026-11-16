@@ -8,28 +8,53 @@ import { Switch } from "../../components/shared/Switch.jsx";
 import { parseAmount } from "../../lib/converter.js";
 import { formatAmount } from "../../lib/format.js";
 import { useAction } from "../../lib/useAction.js";
+import { noticingDeactivation } from "./inactiveRefusal.js";
+import { useUnsavedChanges } from "./unsavedChanges.js";
 
 interface DailyCapFormProps {
   currency: Currency;
   initialCap: number | null;
+  onDeactivated: () => void;
 }
 
-export function DailyCapForm({ currency, initialCap }: DailyCapFormProps) {
-  const [limited, setLimited] = useState(initialCap !== null);
-  const [capText, setCapText] = useState(
-    initialCap === null ? "" : String(initialCap),
-  );
+interface CapChoice {
+  limited: boolean;
+  capText: string;
+}
+
+function choiceOf(cap: number | null): CapChoice {
+  return { limited: cap !== null, capText: cap === null ? "" : String(cap) };
+}
+
+export function DailyCapForm({
+  currency,
+  initialCap,
+  onDeactivated,
+}: DailyCapFormProps) {
+  const [saved, setSaved] = useState(() => choiceOf(initialCap));
+  const [limited, setLimited] = useState(saved.limited);
+  const [capText, setCapText] = useState(saved.capText);
   const action = useAction();
+  useUnsavedChanges("Daily cap", {
+    hasChanges:
+      limited !== saved.limited || (limited && capText !== saved.capText),
+    isSaving: action.state.status === "pending",
+  });
 
   async function saveCap(): Promise<string> {
     const cap = parseAmount(capText);
-    await api.setDailyCap(currency.id, cap);
+    await noticingDeactivation(
+      api.setDailyCap(currency.id, cap),
+      onDeactivated,
+    );
+    setSaved({ limited: true, capText });
 
     return `Each user can now receive up to ${formatAmount(cap)} ${currency.abbreviation} per day.`;
   }
 
   async function removeCap(): Promise<string> {
-    await api.removeDailyCap(currency.id);
+    await noticingDeactivation(api.removeDailyCap(currency.id), onDeactivated);
+    setSaved({ limited: false, capText });
 
     return "Daily cap removed. Users can receive any amount.";
   }

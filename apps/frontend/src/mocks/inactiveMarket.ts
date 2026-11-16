@@ -1,8 +1,7 @@
+import { sessionSettingIsOn } from "./sessionSetting.js";
+
 export const INACTIVE_MARKET_KEY = "discoin-mock-inactive-market";
 
 export function marketStartsInactive(): boolean {
-  return (
-    typeof sessionStorage !== "undefined" &&
-    sessionStorage.getItem(INACTIVE_MARKET_KEY) !== null
-  );
+  return sessionSettingIsOn(INACTIVE_MARKET_KEY);
 }

@@ -4,6 +4,7 @@ import { Button } from "../../components/shared/Button.jsx";
 import { ConfirmButton } from "../../components/shared/ConfirmButton.jsx";
 import { SecretField } from "../../components/shared/SecretField.jsx";
 import { useAction } from "../../lib/useAction.js";
+import { useUnsavedChanges } from "./unsavedChanges.js";
 
 export interface ShowOnceCopy {
   label: string;
@@ -15,6 +16,7 @@ export interface ShowOnceCopy {
   warning: string;
   confirmLabel: string;
   cancelLabel: string;
+  dismissLabel: string;
 }
 
 interface ShowOnceSecretProps {
@@ -27,11 +29,24 @@ export function ShowOnceSecret({ exists, issue, copy }: ShowOnceSecretProps) {
   const [issued, setIssued] = useState<string | null>(null);
   const [hasSecret, setHasSecret] = useState(exists);
   const shownRef = useRef<HTMLDivElement>(null);
+  const keptRef = useRef<HTMLParagraphElement>(null);
+  const dismissed = useRef(false);
   const action = useAction();
+  const pending = action.state.status === "pending";
+  useUnsavedChanges(copy.label, {
+    hasChanges: issued !== null,
+    isSaving: pending,
+  });
 
   useEffect(() => {
     if (issued !== null) shownRef.current?.focus();
+    else if (dismissed.current) keptRef.current?.focus();
   }, [issued]);
+
+  function dismiss() {
+    dismissed.current = true;
+    setIssued(null);
+  }
 
   function issueSecret() {
     const isFirst = !hasSecret;
@@ -42,8 +57,6 @@ export function ShowOnceSecret({ exists, issue, copy }: ShowOnceSecretProps) {
       return isFirst ? copy.created : copy.regenerated;
     });
   }
-
-  const pending = action.state.status === "pending";
 
   if (!hasSecret) {
     return (
@@ -79,7 +92,9 @@ export function ShowOnceSecret({ exists, issue, copy }: ShowOnceSecretProps) {
     <div class="form-stack">
       {issued === null ? (
         <div class="form-actions">
-          <p>{copy.kept}</p>
+          <p ref={keptRef} tabIndex={-1}>
+            {copy.kept}
+          </p>
           {regenerate}
         </div>
       ) : (
@@ -88,6 +103,11 @@ export function ShowOnceSecret({ exists, issue, copy }: ShowOnceSecretProps) {
           <SecretField label={copy.label} secret={issued}>
             {regenerate}
           </SecretField>
+          <div class="form-actions">
+            <Button variant="outline" disabled={pending} onClick={dismiss}>
+              {copy.dismissLabel}
+            </Button>
+          </div>
         </div>
       )}
       <ActionStatus state={action.state} inlineFields={[]} />

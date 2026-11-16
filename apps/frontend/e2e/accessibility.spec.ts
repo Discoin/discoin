@@ -2,11 +2,23 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import {
+  NARROW_PHONE_VIEWPORT,
+  PHONE_VIEWPORT,
   WCAG_22_AA_TAGS,
+  choosePickerOption,
+  drawerApiDocs,
+  drawerResources,
+  failLogOutFromDrawer,
+  logOutFromDrawer,
   openAdminReversalReview,
+  openNavDrawer,
   openOwnerReversalReview,
   openPage,
+  pageSidewaysOverflow,
+  picker,
+  sidewaysOverflow,
   startWithEveryCurrencyInactive,
+  startWithFailingLogout,
 } from "./support.js";
 
 const PAGES = [
@@ -15,6 +27,7 @@ const PAGES = [
   { path: "/owner", title: "Bot owner | Discoin" },
   { path: "/admin", title: "Admin | Discoin" },
   { path: "/currency/OAT", title: "Oats (OAT) | Discoin" },
+  { path: "/privacy", title: "Privacy and cookies | Discoin" },
   { path: "/no-such-page", title: "Page not found | Discoin" },
 ];
 const THEMES = ["light", "dark"] as const;
@@ -40,6 +53,18 @@ for (const { path } of PAGES) {
       await expectWcagCompliance(page);
     });
   }
+}
+
+for (const theme of THEMES) {
+  test(`history with a removed currency meets WCAG 2.2 AA in the ${theme} theme`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: theme });
+    await openPage(page, "/");
+    await expect(page.getByText("CRN (Corn, removed)")).toBeVisible();
+
+    await expectWcagCompliance(page);
+  });
 }
 
 for (const theme of THEMES) {
@@ -92,15 +117,12 @@ test("each page has its own title", async ({ page }) => {
 });
 
 test("pages reflow at 320px without sideways scrolling", async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 800 });
+  await page.setViewportSize(NARROW_PHONE_VIEWPORT);
 
   for (const { path } of PAGES) {
     await openPage(page, path);
-    const overflow = await page.evaluate(
-      () => document.documentElement.scrollWidth - window.innerWidth,
-    );
 
-    expect(overflow, path).toBeLessThanOrEqual(0);
+    expect(await pageSidewaysOverflow(page), path).toBeLessThanOrEqual(0);
   }
 });
 
@@ -134,6 +156,37 @@ async function openBlockDialog(page: Page) {
   await page.getByRole("button", { name: "Block a user" }).click();
 }
 
+async function openSwitchConfirmation(page: Page) {
+  await page
+    .getByLabel("Receipt webhook URL")
+    .fill("https://changed.example.com/hook");
+  await choosePickerOption(page, "Bot", "Ticket bot");
+}
+
+const PICKER_LABELS = ["Bot", "Currency"];
+const PICKER_STATES = ["closed", "open"] as const;
+
+for (const theme of THEMES) {
+  for (const label of PICKER_LABELS) {
+    for (const state of PICKER_STATES) {
+      test(`the ${state} ${label} picker on /owner meets WCAG 2.2 AA in the ${theme} theme`, async ({
+        page,
+      }) => {
+        await page.emulateMedia({ colorScheme: theme });
+        await openPage(page, "/owner");
+        await picker(page, label).focus();
+        if (state === "open") await page.keyboard.press("ArrowDown");
+
+        await expect(picker(page, label)).toHaveAttribute(
+          "aria-expanded",
+          String(state === "open"),
+        );
+        await expectWcagCompliance(page);
+      });
+    }
+  }
+}
+
 const DIALOG_STEPS = [
   {
     name: "admin edit form",
@@ -148,9 +201,6 @@ const DIALOG_STEPS = [
     open: async (page: Page) => {
       await page.getByRole("button", { name: "Edit OAT" }).click();
       const dialog = page.getByRole("dialog");
-      await dialog
-        .getByLabel("Owner ID")
-        .fill("305918264730192845");
       await dialog.getByLabel("Weekly income median").fill("300000");
       await dialog.getByRole("button", { name: "Review changes" }).click();
     },
@@ -160,6 +210,47 @@ const DIALOG_STEPS = [
     path: "/admin",
     open: async (page: Page) => {
       await page.getByRole("button", { name: "Add currency" }).click();
+    },
+  },
+  {
+    name: "admin bot assignment review",
+    path: "/admin",
+    open: async (page: Page) => {
+      await page.getByRole("button", { name: "Edit GEM" }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel("Bot").selectOption({ label: "Harvest bot" });
+      await dialog.getByLabel("Weekly income median").fill("30000");
+      await dialog.getByRole("button", { name: "Review changes" }).click();
+    },
+  },
+  {
+    name: "admin add bot form",
+    path: "/admin",
+    open: async (page: Page) => {
+      await page.getByRole("button", { name: "Add bot" }).click();
+    },
+  },
+  {
+    name: "admin edit bot form",
+    path: "/admin",
+    open: async (page: Page) => {
+      await page.getByRole("button", { name: "Edit Harvest bot" }).click();
+    },
+  },
+  {
+    name: "admin currency removal",
+    path: "/admin",
+    open: async (page: Page) => {
+      await page.getByRole("button", { name: "Remove OAT" }).click();
+      await page.getByRole("dialog").getByText("OAT (Oats)").waitFor();
+    },
+  },
+  {
+    name: "admin bot removal",
+    path: "/admin",
+    open: async (page: Page) => {
+      await page.getByRole("button", { name: "Remove Rock bot" }).click();
+      await page.getByRole("dialog").getByText("PBL (Pebbles)").waitFor();
     },
   },
   { name: "admin block form", path: "/admin", open: openBlockDialog },
@@ -173,6 +264,11 @@ const DIALOG_STEPS = [
     name: "owner reversal review",
     path: "/owner",
     open: openOwnerReversalReview,
+  },
+  {
+    name: "owner switch confirmation",
+    path: "/owner",
+    open: openSwitchConfirmation,
   },
 ];
 
@@ -201,3 +297,79 @@ for (const step of DIALOG_STEPS) {
     expect(box.x + box.width).toBeLessThanOrEqual(320);
   });
 }
+
+const LOGIN_STATES = ["logged in", "logged out"] as const;
+type LoginState = (typeof LOGIN_STATES)[number];
+
+async function openHomeWithDrawer(page: Page, state: LoginState) {
+  await openPage(page, "/");
+  if (state === "logged out") await logOutFromDrawer(page);
+
+  return await openNavDrawer(page);
+}
+
+for (const theme of THEMES) {
+  for (const state of LOGIN_STATES) {
+    test(`the menu drawer ${state} meets WCAG 2.2 AA in the ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      await page.setViewportSize(PHONE_VIEWPORT);
+      await openHomeWithDrawer(page, state);
+
+      await expectWcagCompliance(page);
+    });
+
+    test(`the menu drawer ${state} with Resources open meets WCAG 2.2 AA in the ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      await page.setViewportSize(PHONE_VIEWPORT);
+      const drawer = await openHomeWithDrawer(page, state);
+      await drawerResources(drawer).click();
+      await expect(drawerApiDocs(drawer)).toBeVisible();
+
+      await expectWcagCompliance(page);
+    });
+  }
+
+  test(`the menu drawer with a logout error meets WCAG 2.2 AA in the ${theme} theme`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: theme });
+    await startWithFailingLogout(page);
+    await page.setViewportSize(PHONE_VIEWPORT);
+    await openPage(page, "/");
+    await failLogOutFromDrawer(page);
+
+    await expectWcagCompliance(page);
+  });
+
+  test(`the open Resources menu meets WCAG 2.2 AA in the ${theme} theme`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: theme });
+    await openPage(page, "/");
+    await page.getByRole("button", { name: "Resources" }).click();
+    await expect(page.getByRole("link", { name: "API Docs" })).toBeVisible();
+
+    await expectWcagCompliance(page);
+  });
+}
+
+test("the open menu drawer reflows at 320px without sideways scrolling", async ({
+  page,
+}) => {
+  await page.setViewportSize(NARROW_PHONE_VIEWPORT);
+
+  for (const state of LOGIN_STATES) {
+    const drawer = await openHomeWithDrawer(page, state);
+
+    expect(await pageSidewaysOverflow(page), state).toBeLessThanOrEqual(0);
+    expect(await sidewaysOverflow(drawer), state).toBeLessThanOrEqual(0);
+    expect(
+      await sidewaysOverflow(drawer.locator(".nav-drawer__middle")),
+      state,
+    ).toBeLessThanOrEqual(0);
+  }
+});

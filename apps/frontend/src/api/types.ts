@@ -18,7 +18,7 @@ export interface Currency {
   valueHistory: number[];
 }
 
-export interface Transaction {
+export interface TransactionRecord {
   id: string;
   fromCurrencyId: string;
   toCurrencyId: string;
@@ -27,6 +27,17 @@ export interface Transaction {
   status: TransactionStatus;
   submittedAt: string;
   handledAt: string | null;
+}
+
+export interface CurrencyLabel {
+  abbreviation: string;
+  name: string;
+  removed: boolean;
+}
+
+export interface Transaction extends TransactionRecord {
+  fromCurrency: CurrencyLabel;
+  toCurrency: CurrencyLabel;
 }
 
 export interface PendingTransaction extends Transaction {
@@ -45,23 +56,69 @@ export interface CurrencyDetails {
 
 export interface NewCurrency extends CurrencyDetails {
   weeklyMedian: number;
-  ownerId: string;
+  multiplier: number;
+  botId: string | null;
 }
 
-export interface CurrencySettings {
+export interface BotWithCurrencies {
+  id: string;
+  name: string;
+  currencies: Currency[];
+}
+
+export interface BotSettings {
   hasApiToken: boolean;
   hasWebhookSecret: boolean;
   webhookUrl: string | null;
+}
+
+export interface CurrencySettings {
   dailyCap: number | null;
+}
+
+export interface BotName {
+  id: string;
+  name: string;
 }
 
 export interface AdminCurrency {
   currency: Currency;
   weeklyMedian: number;
+  multiplier: number;
+  bot: BotName | null;
+}
+
+export interface SavedCurrency {
+  saved: AdminCurrency;
+  movedBlocks: number;
+}
+
+export interface BotDetails {
+  name: string;
+  discordId: string;
   ownerId: string;
 }
 
-export type BlockLevel = "currency" | "global";
+export interface AdminBot extends BotDetails {
+  id: string;
+  currencyCount: number;
+}
+
+export type BotChanges = Partial<BotDetails>;
+
+export interface CurrencyName {
+  id: string;
+  abbreviation: string;
+  name: string;
+}
+
+export interface RemovalPreview {
+  currencies: CurrencyName[];
+  pendingTransactions: number;
+  enforcedBlocks: number;
+}
+
+export type BlockLevel = "bot" | "global";
 
 export interface BlockedUser {
   userId: string;
@@ -95,7 +152,13 @@ export interface CurrentUser {
   avatarUrl: string;
   defaultAvatarUrl: string;
   isAdmin: boolean;
-  ownedCurrencyIds: string[];
+  ownedBots: OwnedBot[];
+}
+
+export interface OwnedBot {
+  id: string;
+  name: string;
+  currencyIds: string[];
 }
 
 export const HISTORY_DAYS = [7, 30] as const;
@@ -103,7 +166,8 @@ export const HISTORY_DAYS = [7, 30] as const;
 export type HistoryDays = (typeof HISTORY_DAYS)[number];
 
 export interface CurrencyChanges {
-  ownerId?: string;
+  botId?: string;
   weeklyMedian?: number;
+  multiplier?: number;
   active?: boolean;
 }

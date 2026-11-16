@@ -1,15 +1,13 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { WCAG_22_AA_TAGS, openPage, waitForData } from "./support.js";
+import { WCAG_22_AA_TAGS, choosePickerOption, openPage } from "./support.js";
 
-const TICKETS_ID = "019a6f12-3a9c-7f45-8e70-b6215d0c3a18";
 const HOOK_URL = "https://tickets-bot.example.com/discoin";
 
-async function openTickets(page: Page) {
+async function openTicketBot(page: Page) {
   await openPage(page, "/owner");
-  await page.getByLabel("Currency", { exact: true }).selectOption(TICKETS_ID);
-  await waitForData(page);
+  await choosePickerOption(page, "Bot", "Ticket bot");
 }
 
 function webhookPanel(page: Page) {
@@ -47,7 +45,7 @@ test("a regenerated token is shown once with a copy button", async ({
 test("a webhook URL needs a secret first, shown on the URL field", async ({
   page,
 }) => {
-  await openTickets(page);
+  await openTicketBot(page);
   const panel = webhookPanel(page);
   await panel.getByLabel("Receipt webhook URL").fill(HOOK_URL);
   await panel.getByRole("button", { name: "Save webhook" }).click();
@@ -62,7 +60,7 @@ test("a webhook URL needs a secret first, shown on the URL field", async ({
 test("generating a secret shows it once, then the URL saves", async ({
   page,
 }) => {
-  await openTickets(page);
+  await openTicketBot(page);
   const panel = webhookPanel(page);
   await panel.getByRole("button", { name: "Generate webhook secret" }).click();
 
@@ -106,7 +104,7 @@ for (const theme of ["light", "dark"] as const) {
     page,
   }) => {
     await page.emulateMedia({ colorScheme: theme });
-    await openTickets(page);
+    await openTicketBot(page);
     await webhookPanel(page)
       .getByRole("button", { name: "Generate webhook secret" })
       .click();
@@ -138,7 +136,7 @@ test("Test sends a test webhook and says how the endpoint answered", async ({
 });
 
 test("Test only shows once a webhook URL is saved", async ({ page }) => {
-  await openTickets(page);
+  await openTicketBot(page);
 
   await expect(
     webhookPanel(page).getByRole("button", { name: "Test webhook" }),

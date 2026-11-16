@@ -1,9 +1,6 @@
-import { api } from "../../api/client.js";
 import type { Transaction } from "../../api/types.js";
 import { formatTransactionCount } from "../../lib/format.js";
-import { useRequest } from "../../lib/useRequest.js";
 import { Button } from "../shared/Button.jsx";
-import { Loadable } from "../shared/Loadable.jsx";
 import { Notice } from "../shared/Notice.jsx";
 import { TransactionTable } from "../transactions/TransactionTable.jsx";
 import "./ReversalReview.scss";
@@ -33,7 +30,10 @@ export function ReversalReview({
       </p>
       {transactions.length > 0 && (
         <>
-          <ReversalTable transactions={transactions} />
+          <TransactionTable
+            caption="Transactions to reverse"
+            transactions={transactions}
+          />
           <Notice tone="warning" title="Bots take the coins back">
             <p>
               Discoin tells each receiving bot to take the coins back from this
@@ -53,21 +53,5 @@ export function ReversalReview({
         </Button>
       </div>
     </div>
-  );
-}
-
-function ReversalTable({ transactions }: { transactions: Transaction[] }) {
-  const request = useRequest(() => api.listAllCurrencies(), []);
-
-  return (
-    <Loadable state={request.state} label="currencies" onRetry={request.reload}>
-      {(currencies) => (
-        <TransactionTable
-          caption="Transactions to reverse"
-          transactions={transactions}
-          currencies={currencies}
-        />
-      )}
-    </Loadable>
   );
 }

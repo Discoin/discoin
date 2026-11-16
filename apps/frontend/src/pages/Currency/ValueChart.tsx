@@ -2,7 +2,7 @@ import { useState } from "preact/hooks";
 import type { Currency } from "../../api/types.js";
 import { EmptyState } from "../../components/shared/EmptyState.jsx";
 import { LineChart } from "../../components/shared/LineChart.jsx";
-import { formatValue } from "../../lib/format.js";
+import { formatAxisValues, formatValue } from "../../lib/format.js";
 import { lastDays, type ValuePoint } from "../../lib/valueStats.js";
 
 const CHART_RANGES = [
@@ -50,7 +50,7 @@ export function ValueChart({ currency, points }: ValueChartProps) {
           tone="value"
           points={shown}
           format={formatValue}
-          formatAxis={formatValue}
+          formatAxis={formatAxisValues}
         />
       )}
     </div>

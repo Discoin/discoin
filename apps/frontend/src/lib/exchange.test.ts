@@ -7,6 +7,7 @@ import {
   floorToCents,
   marketRate,
   reservesAfterUndo,
+  startingReserve,
 } from "./exchange.js";
 
 const RESERVES = { from: 1_000_000, to: 100_000 };
@@ -32,6 +33,13 @@ describe("reservesAfterUndo", () => {
       from: 1_000_000.01,
       to: 100_000,
     });
+  });
+});
+
+describe("startingReserve", () => {
+  test("is the median times the multiplier, floored to cents", () => {
+    expect(startingReserve(25_000, 10)).toBe(250_000);
+    expect(startingReserve(0.15, 0.15)).toBe(0.02);
   });
 });
 

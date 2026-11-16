@@ -1,23 +1,30 @@
 import type { BlockListApi, DiscoinApi } from "../api/client.js";
 import { ApiError } from "../api/errors.js";
 import type {
+  AdminBot,
   AdminCurrency,
   AdminUser,
   BlockedUser,
   BlockLevel,
+  BotDetails,
+  BotSettings,
+  BotWithCurrencies,
   Currency,
   CurrencyChanges,
   CurrencyDetails,
+  CurrencyLabel,
   CurrencySettings,
   CurrentUser,
   NewCurrency,
   PendingTransaction,
+  RemovalPreview,
   ReservePoint,
   ReverseRequest,
   Transaction,
+  TransactionRecord,
   TransactionStatus,
 } from "../api/types.js";
-import { MAX_SEND_AMOUNT } from "../lib/converter.js";
+import { hasAtMostCents, MAX_SEND_AMOUNT } from "../lib/converter.js";
 import {
   calculatePayout,
   currencyValue,
@@ -26,19 +33,32 @@ import {
 } from "../lib/exchange.js";
 import { formatAmount } from "../lib/format.js";
 import {
+  type MockBot,
+  type RemovedCurrency,
   sampleAdmins,
+  sampleBotBlocks,
+  sampleBotIds,
+  sampleBots,
   sampleCurrencies,
   sampleCurrencyBlocks,
   sampleCurrentUser,
+  sampleDailyCaps,
   sampleGlobalBlocks,
-  sampleOwnerIds,
+  sampleMultipliers,
+  sampleRemovedCurrencies,
   sampleReserveHistories,
-  sampleSettings,
   sampleTransactionSenders,
   sampleTransactions,
   sampleWeeklyMedians,
 } from "./data.js";
+import { failedLogout, logoutFails } from "./failingLogout.js";
 import { marketStartsInactive } from "./inactiveMarket.js";
+import {
+  lostConnection,
+  renameFindsCurrencyDeactivated,
+  renamesLoseConnection,
+  renamesStall,
+} from "./ownerScenarios.js";
 import {
   adminReversalFilter,
   ownerReversalFilter,
@@ -46,7 +66,7 @@ import {
   type TransactionFilter,
 } from "./reversals.js";
 
-const LATENCY_MS = 300;
+export const LATENCY_MS = 300;
 const DAY_MS = 86_400_000;
 const DISCORD_ID_PATTERN = /^\d{17,20}$/;
 const ABBREVIATION_PATTERN = /^[A-Z]{3,4}$/;
@@ -61,15 +81,28 @@ const TOKEN_PREFIX = "dsc_live_";
 const TOKEN_LENGTH = 24;
 const TOKEN_ALPHABET =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+const MAX_RESERVE = 99_999_999_999_999.99;
+const MAX_RESERVE_TEXT = "99,999,999,999,999.99";
+const PICK_A_BOT = "Pick the bot that runs this currency.";
+
+interface ReserveTerms {
+  weeklyMedian: number;
+  multiplier: number;
+  blamedField: string;
+}
 
 interface MockState {
   currencies: Currency[];
+  removedCurrencies: RemovedCurrency[];
   histories: Record<string, ReservePoint[]>;
   weeklyMedians: Record<string, number>;
-  ownerIds: Record<string, string>;
-  transactions: Transaction[];
+  multipliers: Record<string, number>;
+  bots: MockBot[];
+  botIds: Record<string, string | null>;
+  dailyCaps: Record<string, number | null>;
+  transactions: TransactionRecord[];
   transactionSenders: Record<string, string>;
-  settings: Record<string, CurrencySettings>;
+  botBlocks: Record<string, BlockedUser[]>;
   currencyBlocks: Record<string, BlockedUser[]>;
   globalBlocks: BlockedUser[];
   admins: AdminUser[];
@@ -91,12 +124,16 @@ function initialState(): MockState {
 function sampleState(): MockState {
   return structuredClone({
     currencies: sampleCurrencies,
+    removedCurrencies: sampleRemovedCurrencies,
     histories: sampleReserveHistories,
     weeklyMedians: sampleWeeklyMedians,
-    ownerIds: sampleOwnerIds,
+    multipliers: sampleMultipliers,
+    bots: sampleBots,
+    botIds: sampleBotIds,
+    dailyCaps: sampleDailyCaps,
     transactions: sampleTransactions,
     transactionSenders: sampleTransactionSenders,
-    settings: sampleSettings,
+    botBlocks: sampleBotBlocks,
     currencyBlocks: sampleCurrencyBlocks,
     globalBlocks: sampleGlobalBlocks,
     admins: sampleAdmins,
@@ -162,16 +199,57 @@ function discordUserId(value: string, field: string): string {
   return trimmed;
 }
 
-function checkedOwner(changes: CurrencyChanges): string | undefined {
-  if (changes.ownerId === undefined) return undefined;
-
-  return discordUserId(changes.ownerId, "ownerId");
+function checkedMedian(weeklyMedian: number): number {
+  return positiveAmount(weeklyMedian, "weeklyMedian", "weekly median");
 }
 
-function checkedMedian(changes: CurrencyChanges): number | undefined {
-  if (changes.weeklyMedian === undefined) return undefined;
+function sentReserveValue(value: number, field: string, label: string): number {
+  if (Number.isNaN(value)) {
+    throw new ApiError(400, `Enter the ${label}.`, field);
+  }
 
-  return positiveAmount(changes.weeklyMedian, "weeklyMedian", "weekly median");
+  return value;
+}
+
+function checkedMultiplier(multiplier: number): number {
+  if (!Number.isFinite(multiplier) || multiplier <= 0) {
+    throw new ApiError(
+      400,
+      "The reserve multiplier must be above 0.",
+      "multiplier",
+    );
+  }
+
+  if (!hasAtMostCents(multiplier)) {
+    throw new ApiError(
+      400,
+      "The reserve multiplier can have at most 2 decimals.",
+      "multiplier",
+    );
+  }
+
+  return multiplier;
+}
+
+function checkedStartingReserve(terms: ReserveTerms): number {
+  if (terms.weeklyMedian * terms.multiplier > MAX_RESERVE) {
+    throw new ApiError(
+      400,
+      `This median and multiplier give a reserve above ${MAX_RESERVE_TEXT}. Lower one of them.`,
+      terms.blamedField,
+    );
+  }
+
+  const reserve = startingReserve(terms.weeklyMedian, terms.multiplier);
+  if (reserve <= 0) {
+    throw new ApiError(
+      400,
+      "This median and multiplier give a reserve below 0.01. Raise one of them.",
+      terms.blamedField,
+    );
+  }
+
+  return reserve;
 }
 
 function webhookUrl(value: string): string {
@@ -214,8 +292,54 @@ function checkedAbbreviation(value: string): string {
   return abbreviation;
 }
 
+function checkedBotDetails(bot: BotDetails, others: MockBot[]): BotDetails {
+  const details = {
+    name: requiredText(bot.name, "name", "bot name"),
+    discordId: discordUserId(bot.discordId, "discordId"),
+    ownerId: discordUserId(bot.ownerId, "ownerId"),
+  };
+  if (others.some((other) => other.discordId === details.discordId)) {
+    throw new ApiError(
+      409,
+      "Another bot already has that Discord ID.",
+      "discordId",
+    );
+  }
+
+  return details;
+}
+
+function withoutCredentials(bot: MockBot): MockBot {
+  return {
+    ...bot,
+    hasApiToken: false,
+    hasWebhookSecret: false,
+    webhookUrl: null,
+  };
+}
+
+function byName(bots: MockBot[]): MockBot[] {
+  return [...bots].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function isListed(users: BlockedUser[], userId: string): boolean {
   return users.some((user) => user.userId === userId);
+}
+
+function mergedBlocks(
+  kept: BlockedUser[],
+  moving: BlockedUser[],
+): BlockedUser[] {
+  const byUser = new Map(kept.map((user) => [user.userId, user]));
+
+  for (const user of moving) {
+    const existing = byUser.get(user.userId);
+    if (existing === undefined || user.blockedAt < existing.blockedAt) {
+      byUser.set(user.userId, user);
+    }
+  }
+
+  return [...byUser.values()];
 }
 
 interface BlockStore {
@@ -224,9 +348,9 @@ interface BlockStore {
   write: (users: BlockedUser[]) => void;
   readInherited: () => BlockedUser[];
   findReversible: (userId: string, reverse: ReverseRequest) => Transaction[];
-  findCancellable: (userId: string) => Transaction[];
+  findCancellable: (userId: string) => TransactionRecord[];
   undo: (
-    transactions: Transaction[],
+    transactions: TransactionRecord[],
     status: TransactionStatus,
   ) => Transaction[];
 }
@@ -301,25 +425,136 @@ export function createMockApi(): DiscoinApi {
     );
   }
 
-  function isMine(currencyId: string): boolean {
-    return (
-      lookup(state.ownerIds, currencyId, "currency owner") ===
-      sampleCurrentUser.userId
+  function bot(id: string): MockBot {
+    const found = state.bots.find((candidate) => candidate.id === id);
+    if (found === undefined) throw notFound("bot");
+
+    return found;
+  }
+
+  function replaceBot(updated: MockBot): void {
+    state.bots = state.bots.map((candidate) =>
+      candidate.id === updated.id ? updated : candidate,
     );
   }
 
-  function ownedCurrency(id: string): Currency {
-    if (!isMine(id)) {
-      throw new ApiError(403, "You don't own that currency.");
+  function botIdOf(currencyId: string): string | null {
+    return lookup(state.botIds, currencyId, "currency");
+  }
+
+  function currencyIdsOf(botId: string): string[] {
+    return currenciesOf(botId).map((found) => found.id);
+  }
+
+  function requireOwnerOf(found: MockBot, subject: string): MockBot {
+    if (found.ownerId !== sampleCurrentUser.userId) {
+      throw new ApiError(403, `You don't own that ${subject}.`);
     }
+
+    return found;
+  }
+
+  function ownedBot(botId: string): MockBot {
+    return requireOwnerOf(bot(botId), "bot");
+  }
+
+  function botOfOwnedCurrency(currencyId: string): MockBot {
+    currency(currencyId);
+    const botId = botIdOf(currencyId);
+    if (botId === null) {
+      throw new ApiError(
+        403,
+        "This currency has no bot yet, so nobody owns it. Ask a Discoin admin to assign its bot.",
+      );
+    }
+
+    return requireOwnerOf(bot(botId), "currency");
+  }
+
+  function ownedCurrency(id: string): Currency {
+    botOfOwnedCurrency(id);
 
     return currency(id);
   }
 
-  function settings(currencyId: string): CurrencySettings {
+  function writableCurrency(id: string): Currency {
+    const found = ownedCurrency(id);
+    if (!found.active) {
+      throw new ApiError(
+        400,
+        `${found.abbreviation} is inactive, so its settings can't be changed until a Discoin admin reactivates it.`,
+        "currencyId",
+      );
+    }
+
+    return found;
+  }
+
+  function updateOwnedBot(
+    botId: string,
+    change: (found: MockBot) => MockBot,
+  ): void {
+    replaceBot(change(ownedBot(botId)));
+  }
+
+  function botSettings(botId: string): BotSettings {
+    const { hasApiToken, hasWebhookSecret, webhookUrl } = ownedBot(botId);
+
+    return { hasApiToken, hasWebhookSecret, webhookUrl };
+  }
+
+  function currencySettings(currencyId: string): CurrencySettings {
     ownedCurrency(currencyId);
 
-    return lookup(state.settings, currencyId, "currency settings");
+    return { dailyCap: lookup(state.dailyCaps, currencyId, "currency") };
+  }
+
+  function currentUsersBots(): MockBot[] {
+    return byName(state.bots).filter(
+      (found) => found.ownerId === sampleCurrentUser.userId,
+    );
+  }
+
+  function currenciesOf(botId: string): Currency[] {
+    return state.currencies
+      .filter((found) => state.botIds[found.id] === botId)
+      .sort((a, b) => a.abbreviation.localeCompare(b.abbreviation));
+  }
+
+  function labelOf(currencyId: string): CurrencyLabel {
+    const live = state.currencies.find((found) => found.id === currencyId);
+    if (live !== undefined) {
+      return {
+        abbreviation: live.abbreviation,
+        name: live.name,
+        removed: false,
+      };
+    }
+
+    const removed = state.removedCurrencies.find(
+      (found) => found.id === currencyId,
+    );
+    if (removed === undefined) {
+      throw new Error(`Transaction names an unknown currency "${currencyId}"`);
+    }
+
+    return {
+      abbreviation: removed.abbreviation,
+      name: removed.name,
+      removed: true,
+    };
+  }
+
+  function labeled(record: TransactionRecord): Transaction {
+    return {
+      ...record,
+      fromCurrency: labelOf(record.fromCurrencyId),
+      toCurrency: labelOf(record.toCurrencyId),
+    };
+  }
+
+  function labeledWhere(involves: TransactionFilter): Transaction[] {
+    return state.transactions.filter(involves).map(labeled);
   }
 
   function checkedDetails(
@@ -343,10 +578,96 @@ export function createMockApi(): DiscoinApi {
   }
 
   function adminCurrency(found: Currency): AdminCurrency {
+    const botId = botIdOf(found.id);
+
     return {
       currency: found,
       weeklyMedian: lookup(state.weeklyMedians, found.id, "weekly median"),
-      ownerId: lookup(state.ownerIds, found.id, "currency owner"),
+      multiplier: lookup(state.multipliers, found.id, "multiplier"),
+      bot: botId === null ? null : { id: botId, name: bot(botId).name },
+    };
+  }
+
+  function adminBot(found: MockBot): AdminBot {
+    const { id, name, discordId, ownerId } = found;
+
+    return {
+      id,
+      name,
+      discordId,
+      ownerId,
+      currencyCount: currencyIdsOf(id).length,
+    };
+  }
+
+  function checkedBotId(botId: string | null): string {
+    if (botId === null) throw new ApiError(400, PICK_A_BOT, "botId");
+
+    if (!state.bots.some((candidate) => candidate.id === botId)) {
+      throw new ApiError(404, "No bot with that ID.", "botId");
+    }
+
+    return botId;
+  }
+
+  function checkedAssignment(
+    currencyId: string,
+    changes: CurrencyChanges,
+  ): string | undefined {
+    if (!("botId" in changes)) return undefined;
+
+    if (botIdOf(currencyId) !== null) {
+      throw new ApiError(
+        409,
+        "This currency already has a bot. Currencies can't change bot.",
+        "botId",
+      );
+    }
+
+    return checkedBotId(changes.botId ?? null);
+  }
+
+  function ownBlocks(currencyId: string): BlockedUser[] {
+    if (botIdOf(currencyId) !== null) return [];
+
+    return lookup(state.currencyBlocks, currencyId, "currency");
+  }
+
+  function assignBot(currencyId: string, botId: string): number {
+    const moving = ownBlocks(currencyId);
+    state.botIds[currencyId] = botId;
+    state.botBlocks[botId] = mergedBlocks(
+      lookup(state.botBlocks, botId, "bot"),
+      moving,
+    );
+    delete state.currencyBlocks[currencyId];
+
+    return moving.length;
+  }
+
+  function changedReserveTerms(
+    currencyId: string,
+    changes: CurrencyChanges,
+  ): ReserveTerms | undefined {
+    const { weeklyMedian, multiplier } = changes;
+    if (weeklyMedian === undefined && multiplier === undefined) {
+      return undefined;
+    }
+
+    return {
+      weeklyMedian:
+        weeklyMedian === undefined
+          ? lookup(state.weeklyMedians, currencyId, "weekly median")
+          : checkedMedian(
+              sentReserveValue(weeklyMedian, "weeklyMedian", "weekly median"),
+            ),
+      multiplier:
+        multiplier === undefined
+          ? lookup(state.multipliers, currencyId, "multiplier")
+          : checkedMultiplier(
+              sentReserveValue(multiplier, "multiplier", "reserve multiplier"),
+            ),
+      blamedField: multiplier === undefined ? "weeklyMedian" : "multiplier",
     };
   }
 
@@ -367,9 +688,10 @@ export function createMockApi(): DiscoinApi {
     ];
   }
 
-  function resetReserve(found: Currency, weeklyMedian: number): void {
-    setReserve(found.id, startingReserve(weeklyMedian));
-    state.weeklyMedians[found.id] = weeklyMedian;
+  function resetReserve(currencyId: string, terms: ReserveTerms): void {
+    setReserve(currencyId, checkedStartingReserve(terms));
+    state.weeklyMedians[currencyId] = terms.weeklyMedian;
+    state.multipliers[currencyId] = terms.multiplier;
   }
 
   function atomically<T>(change: () => T): T {
@@ -383,7 +705,7 @@ export function createMockApi(): DiscoinApi {
   }
 
   function undoOne(
-    transaction: Transaction,
+    transaction: TransactionRecord,
     status: TransactionStatus,
   ): Transaction {
     const { fromCurrencyId, toCurrencyId } = transaction;
@@ -403,11 +725,11 @@ export function createMockApi(): DiscoinApi {
       candidate.id === undone.id ? undone : candidate,
     );
 
-    return undone;
+    return labeled(undone);
   }
 
   function undoAll(
-    transactions: Transaction[],
+    transactions: TransactionRecord[],
     status: TransactionStatus,
   ): Transaction[] {
     return atomically(() =>
@@ -415,7 +737,7 @@ export function createMockApi(): DiscoinApi {
     );
   }
 
-  function senderOf(transaction: Transaction): string {
+  function senderOf(transaction: TransactionRecord): string {
     return lookup(state.transactionSenders, transaction.id, "transaction");
   }
 
@@ -423,6 +745,21 @@ export function createMockApi(): DiscoinApi {
     return (transaction) =>
       transaction.fromCurrencyId === currencyId ||
       transaction.toCurrencyId === currencyId;
+  }
+
+  function involvesAny(currencyIds: string[]): TransactionFilter {
+    return (transaction) =>
+      currencyIds.includes(transaction.fromCurrencyId) ||
+      currencyIds.includes(transaction.toCurrencyId);
+  }
+
+  function bothSidesLive(transaction: TransactionRecord): boolean {
+    const ids = state.currencies.map((found) => found.id);
+
+    return (
+      ids.includes(transaction.fromCurrencyId) &&
+      ids.includes(transaction.toCurrencyId)
+    );
   }
 
   function pendingOf(userId: string, involves: TransactionFilter) {
@@ -434,6 +771,15 @@ export function createMockApi(): DiscoinApi {
           involves(transaction),
       )
       .sort((a, b) => Date.parse(b.submittedAt) - Date.parse(a.submittedAt));
+  }
+
+  function pendingInvolving(currencyIds: string[]): TransactionRecord[] {
+    const involves = involvesAny(currencyIds);
+
+    return state.transactions.filter(
+      (transaction) =>
+        transaction.status === "Pending" && involves(transaction),
+    );
   }
 
   function requireActive(found: Currency, field: string): void {
@@ -483,9 +829,11 @@ export function createMockApi(): DiscoinApi {
     if (!state.loggedIn) return null;
 
     const { userId, username } = sampleCurrentUser;
-    const ownedCurrencyIds = state.currencies
-      .filter((found) => isMine(found.id))
-      .map((found) => found.id);
+    const ownedBots = currentUsersBots().map((found) => ({
+      id: found.id,
+      name: found.name,
+      currencyIds: currencyIdsOf(found.id),
+    }));
 
     return {
       userId,
@@ -493,24 +841,49 @@ export function createMockApi(): DiscoinApi {
       avatarUrl: SAMPLE_AVATAR,
       defaultAvatarUrl: SAMPLE_AVATAR,
       isAdmin: true,
-      ownedCurrencyIds,
+      ownedBots,
     };
-  }
-
-  function cancelPendingFor(currencyId: string): void {
-    const pending = state.transactions.filter(
-      (transaction) =>
-        transaction.status === "Pending" &&
-        involvesCurrency(currencyId)(transaction),
-    );
-    undoAll(pending, "Cancelled");
   }
 
   function setActive(currencyId: string, active: boolean): void {
     if (currency(currencyId).active === active) return;
 
-    if (!active) cancelPendingFor(currencyId);
+    if (!active) undoAll(pendingInvolving([currencyId]), "Cancelled");
     replaceCurrency({ ...currency(currencyId), active });
+  }
+
+  function retireCurrencies(currencyIds: string[]): void {
+    undoAll(pendingInvolving(currencyIds), "Cancelled");
+    const retired = state.currencies.filter((found) =>
+      currencyIds.includes(found.id),
+    );
+    state.currencies = state.currencies.filter(
+      (found) => !currencyIds.includes(found.id),
+    );
+    state.removedCurrencies = [
+      ...state.removedCurrencies,
+      ...retired.map(({ id, abbreviation, name, reserve }) => ({
+        id,
+        abbreviation,
+        name,
+        reserve,
+      })),
+    ];
+  }
+
+  function removalPreview(
+    currencyIds: string[],
+    enforcedBlocks: number,
+  ): RemovalPreview {
+    return {
+      currencies: currencyIds.map((id) => {
+        const { abbreviation, name } = currency(id);
+
+        return { id, abbreviation, name };
+      }),
+      pendingTransactions: pendingInvolving(currencyIds).length,
+      enforcedBlocks,
+    };
   }
 
   function reversibleBy(
@@ -518,18 +891,17 @@ export function createMockApi(): DiscoinApi {
     reverse: ReverseRequest,
     involves: TransactionFilter,
   ): Transaction[] {
-    return selectReversible(state.transactions, {
+    return selectReversible(state.transactions.filter(bothSidesLive), {
       senders: state.transactionSenders,
       userId,
       window: reverse.window,
       involves,
-    });
+    }).map(labeled);
   }
 
   return {
     listCurrencies: () =>
       respond(() => state.currencies.filter((found) => found.active)),
-    listAllCurrencies: () => respond(() => state.currencies),
     getCurrency: (abbreviation) =>
       respond(() => {
         const wanted = abbreviation.toUpperCase();
@@ -543,15 +915,14 @@ export function createMockApi(): DiscoinApi {
         return found;
       }),
     listCurrencyTransactions: (currencyId) =>
-      respond(() =>
-        state.transactions.filter(
-          (transaction) =>
-            transaction.fromCurrencyId === currencyId ||
-            transaction.toCurrencyId === currencyId,
-        ),
-      ),
+      respond(() => {
+        currency(currencyId);
+
+        return labeledWhere(involvesCurrency(currencyId));
+      }),
     getReserveHistory: (currencyId, days) =>
       respond(() => {
+        currency(currencyId);
         const points = lookup(state.histories, currencyId, "currency");
         const latest = Date.parse(points[points.length - 1].at);
         const since = latest - days * DAY_MS;
@@ -563,23 +934,40 @@ export function createMockApi(): DiscoinApi {
     getMe: () => respond(currentUser),
     logout: () =>
       respond(() => {
+        if (logoutFails()) throw failedLogout();
+
         state.loggedIn = false;
       }),
-    listRecentTransactions: () => respond(() => state.transactions),
+    listRecentTransactions: () => respond(() => labeledWhere(() => true)),
     listMyTransactions: () =>
       respond(() =>
-        state.transactions.filter(
+        labeledWhere(
           (transaction) => senderOf(transaction) === sampleCurrentUser.userId,
         ),
       ),
 
-    listOwnedCurrencies: () =>
-      respond(() => state.currencies.filter((found) => isMine(found.id))),
-    getCurrencySettings: (currencyId) => respond(() => settings(currencyId)),
-    updateCurrencyDetails: (currencyId, details) =>
-      respond(() => {
+    listOwnedBots: () =>
+      respond(() =>
+        currentUsersBots().map(
+          (found): BotWithCurrencies => ({
+            id: found.id,
+            name: found.name,
+            currencies: currenciesOf(found.id),
+          }),
+        ),
+      ),
+    getBotSettings: (botId) => respond(() => botSettings(botId)),
+    getCurrencySettings: (currencyId) =>
+      respond(() => currencySettings(currencyId)),
+    updateCurrencyDetails: (currencyId, details) => {
+      if (renamesStall()) return new Promise<Currency>(() => undefined);
+
+      return respond(() => {
+        if (renamesLoseConnection()) throw lostConnection();
+        if (renameFindsCurrencyDeactivated()) setActive(currencyId, false);
+
         const updated = {
-          ...ownedCurrency(currencyId),
+          ...writableCurrency(currencyId),
           ...checkedDetails(
             details,
             state.currencies.filter((candidate) => candidate.id !== currencyId),
@@ -588,24 +976,30 @@ export function createMockApi(): DiscoinApi {
         replaceCurrency(updated);
 
         return updated;
-      }),
-    regenerateApiToken: (currencyId) =>
+      });
+    },
+    regenerateApiToken: (botId) =>
       respond(() => {
-        settings(currencyId).hasApiToken = true;
+        updateOwnedBot(botId, (found) => ({
+          ...found,
+          hasApiToken: true,
+        }));
 
         return randomToken(TOKEN_PREFIX);
       }),
-    generateWebhookSecret: (currencyId) =>
+    generateWebhookSecret: (botId) =>
       respond(() => {
-        settings(currencyId).hasWebhookSecret = true;
+        updateOwnedBot(botId, (found) => ({
+          ...found,
+          hasWebhookSecret: true,
+        }));
 
         return randomToken(SECRET_PREFIX);
       }),
-    setWebhookUrl: (currencyId, url) =>
+    setWebhookUrl: (botId, url) =>
       respond(() => {
-        const target = settings(currencyId);
         const checked = webhookUrl(url);
-        if (!target.hasWebhookSecret) {
+        if (!ownedBot(botId).hasWebhookSecret) {
           throw new ApiError(
             400,
             "Generate a webhook secret first, so Discoin can sign each webhook.",
@@ -613,11 +1007,14 @@ export function createMockApi(): DiscoinApi {
           );
         }
 
-        target.webhookUrl = checked;
+        updateOwnedBot(botId, (found) => ({
+          ...found,
+          webhookUrl: checked,
+        }));
       }),
-    testWebhook: (currencyId) =>
+    testWebhook: (botId) =>
       respond(() => {
-        if (settings(currencyId).webhookUrl === null) {
+        if (ownedBot(botId).webhookUrl === null) {
           throw new ApiError(
             400,
             "Save a webhook URL before sending a test.",
@@ -627,13 +1024,14 @@ export function createMockApi(): DiscoinApi {
 
         return MOCK_WEBHOOK_STATUS;
       }),
-    removeWebhookUrl: (currencyId) =>
+    removeWebhookUrl: (botId) =>
       respond(() => {
-        settings(currencyId).webhookUrl = null;
+        updateOwnedBot(botId, (found) => ({ ...found, webhookUrl: null }));
       }),
     setDailyCap: (currencyId, cap) =>
       respond(() => {
-        settings(currencyId).dailyCap = positiveAmount(
+        writableCurrency(currencyId);
+        state.dailyCaps[currencyId] = positiveAmount(
           cap,
           "dailyCap",
           "daily cap",
@@ -641,24 +1039,24 @@ export function createMockApi(): DiscoinApi {
       }),
     removeDailyCap: (currencyId) =>
       respond(() => {
-        settings(currencyId).dailyCap = null;
+        writableCurrency(currencyId);
+        state.dailyCaps[currencyId] = null;
       }),
-    listPendingTransactions: (currencyId) =>
+    listPendingTransactions: (botId) =>
       respond(() => {
-        ownedCurrency(currencyId);
+        ownedBot(botId);
+        const botCurrencyIds = currencyIdsOf(botId);
 
-        return state.transactions
-          .filter(
-            (transaction) =>
-              transaction.toCurrencyId === currencyId &&
-              transaction.status === "Pending",
-          )
-          .map(
-            (transaction): PendingTransaction => ({
-              ...transaction,
-              userId: senderOf(transaction),
-            }),
-          );
+        return labeledWhere(
+          (transaction) =>
+            botCurrencyIds.includes(transaction.toCurrencyId) &&
+            transaction.status === "Pending",
+        ).map(
+          (transaction): PendingTransaction => ({
+            ...transaction,
+            userId: senderOf(transaction),
+          }),
+        );
       }),
     resendWebhook: (transactionId) =>
       respond(() => {
@@ -667,53 +1065,50 @@ export function createMockApi(): DiscoinApi {
         );
         if (transaction === undefined) throw notFound("transaction");
 
+        const receivingBot = botOfOwnedCurrency(transaction.toCurrencyId);
+
         if (transaction.status !== "Pending") {
           throw new ApiError(400, "Only Pending transactions can be resent.");
         }
 
-        const target = settings(transaction.toCurrencyId);
-        if (target.webhookUrl === null) {
+        if (receivingBot.webhookUrl === null) {
           throw new ApiError(
             400,
             "Add a webhook URL before resending. Your bot can still poll for this transaction.",
           );
         }
       }),
-    currencyBlocks: (currencyId) =>
+    botBlocks: (botId) =>
       createBlockList({
-        level: "currency",
-        read: () => {
-          ownedCurrency(currencyId);
-
-          return lookup(state.currencyBlocks, currencyId, "currency");
-        },
+        level: "bot",
+        read: () => lookup(state.botBlocks, ownedBot(botId).id, "bot"),
         write: (users) => {
-          state.currencyBlocks[currencyId] = users;
+          state.botBlocks[ownedBot(botId).id] = users;
         },
         readInherited: () => state.globalBlocks,
         findReversible: (userId, reverse) =>
           reversibleBy(
             userId,
             reverse,
-            ownerReversalFilter(currencyId, reverse),
+            ownerReversalFilter(currencyIdsOf(botId), reverse),
           ),
         findCancellable: (userId) =>
-          pendingOf(userId, involvesCurrency(currencyId)),
+          pendingOf(userId, involvesAny(currencyIdsOf(botId))),
         undo: undoAll,
       }),
 
     listAdminCurrencies: () =>
       respond(() => state.currencies.map(adminCurrency)),
-    addCurrency: (newCurrency) =>
+    addCurrency: (newCurrency: NewCurrency) =>
       respond(() => {
         const details = checkedDetails(newCurrency, state.currencies);
-        const weeklyMedian = positiveAmount(
-          newCurrency.weeklyMedian,
-          "weeklyMedian",
-          "weekly median",
-        );
-        const ownerId = discordUserId(newCurrency.ownerId, "ownerId");
-        const reserve = startingReserve(weeklyMedian);
+        const terms = {
+          weeklyMedian: checkedMedian(newCurrency.weeklyMedian),
+          multiplier: checkedMultiplier(newCurrency.multiplier),
+          blamedField: "multiplier",
+        };
+        const reserve = checkedStartingReserve(terms);
+        const botId = checkedBotId(newCurrency.botId);
         const now = Date.now();
         const added: Currency = {
           id: crypto.randomUUID(),
@@ -724,15 +1119,10 @@ export function createMockApi(): DiscoinApi {
           valueHistory: [currencyValue(reserve), currencyValue(reserve)],
         };
         state.currencies = [...state.currencies, added];
-        state.weeklyMedians[added.id] = weeklyMedian;
-        state.ownerIds[added.id] = ownerId;
-        state.settings[added.id] = {
-          hasApiToken: false,
-          hasWebhookSecret: false,
-          webhookUrl: null,
-          dailyCap: null,
-        };
-        state.currencyBlocks[added.id] = [];
+        state.weeklyMedians[added.id] = terms.weeklyMedian;
+        state.multipliers[added.id] = terms.multiplier;
+        state.botIds[added.id] = botId;
+        state.dailyCaps[added.id] = null;
         state.histories[added.id] = [now - DAY_MS, now].map((at) => ({
           at: new Date(at).toISOString(),
           reserve,
@@ -743,26 +1133,93 @@ export function createMockApi(): DiscoinApi {
     updateCurrency: (currencyId, changes) =>
       respond(() => {
         currency(currencyId);
-        const owner = checkedOwner(changes);
-        const median = checkedMedian(changes);
+        const botId = checkedAssignment(currencyId, changes);
+        const terms = changedReserveTerms(currencyId, changes);
         const { active } = changes;
         if (
-          owner === undefined &&
-          median === undefined &&
+          botId === undefined &&
+          terms === undefined &&
           active === undefined
         ) {
           throw new ApiError(
             400,
-            "Change the owner, the median or the status before saving.",
+            "Pick a bot, change the median, the multiplier or the status before saving.",
           );
         }
 
         return atomically(() => {
           if (active !== undefined) setActive(currencyId, active);
-          if (owner !== undefined) state.ownerIds[currencyId] = owner;
-          if (median !== undefined) resetReserve(currency(currencyId), median);
+          const movedBlocks =
+            botId === undefined ? 0 : assignBot(currencyId, botId);
+          if (terms !== undefined) resetReserve(currencyId, terms);
 
-          return adminCurrency(currency(currencyId));
+          return { saved: adminCurrency(currency(currencyId)), movedBlocks };
+        });
+      }),
+    previewCurrencyRemoval: (currencyId) =>
+      respond(() => {
+        currency(currencyId);
+
+        return removalPreview([currencyId], ownBlocks(currencyId).length);
+      }),
+    removeCurrency: (currencyId) =>
+      respond(() => {
+        currency(currencyId);
+        atomically(() => retireCurrencies([currencyId]));
+      }),
+    listAdminBots: () => respond(() => byName(state.bots).map(adminBot)),
+    addBot: (details) =>
+      respond(() => {
+        const added: MockBot = {
+          id: crypto.randomUUID(),
+          ...checkedBotDetails(details, state.bots),
+          hasApiToken: false,
+          hasWebhookSecret: false,
+          webhookUrl: null,
+        };
+        state.bots = [...state.bots, added];
+        state.botBlocks[added.id] = [];
+
+        return adminBot(added);
+      }),
+    updateBot: (botId, changes) =>
+      respond(() => {
+        const stored = bot(botId);
+        if (Object.keys(changes).length === 0) {
+          throw new ApiError(
+            400,
+            "Change the name, the Discord ID or the owner before saving.",
+          );
+        }
+
+        const details = checkedBotDetails(
+          { ...stored, ...changes },
+          state.bots.filter((candidate) => candidate.id !== botId),
+        );
+        const updated = { ...stored, ...details };
+        replaceBot(
+          details.ownerId === stored.ownerId
+            ? updated
+            : withoutCredentials(updated),
+        );
+
+        return adminBot(bot(botId));
+      }),
+    previewBotRemoval: (botId) =>
+      respond(() => {
+        bot(botId);
+
+        return removalPreview(
+          currencyIdsOf(botId),
+          lookup(state.botBlocks, botId, "bot").length,
+        );
+      }),
+    removeBot: (botId) =>
+      respond(() => {
+        bot(botId);
+        atomically(() => {
+          retireCurrencies(currencyIdsOf(botId));
+          state.bots = state.bots.filter((candidate) => candidate.id !== botId);
         });
       }),
     globalBlocks: createBlockList({

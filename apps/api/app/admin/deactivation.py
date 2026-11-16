@@ -2,22 +2,16 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from psycopg import Connection
+from psycopg import Connection, sql
 from psycopg.rows import DictRow
 
-from app.transactions.exchange import lock_exchange_sides
 from app.transactions.ledger import undo_transaction
+from app.transactions.locking import LockPlan, lock_currencies_first
 from app.webhooks.delivery import enqueue_webhook
 
 
 def deactivate_currency(db: Connection[DictRow], currency_id: UUID, now: datetime) -> None:
-    pending = lock_pending_transactions(db, currency_id)
-    lock_exchange_sides(db, {row["from_currency_id"] for row in pending} | {row["to_currency_id"] for row in pending})
-
-    for transaction in pending:
-        cancelled = undo_transaction(db, transaction, "Cancelled", now)
-        enqueue_webhook(db, cancelled, "cancelled", now)
-
+    cancel_pending(db, frozenset({currency_id}), now)
     db.execute("UPDATE currencies SET active = false WHERE id = %s", (currency_id,))
 
 
@@ -25,14 +19,23 @@ def reactivate_currency(db: Connection[DictRow], currency_id: UUID) -> None:
     db.execute("UPDATE currencies SET active = true WHERE id = %s", (currency_id,))
 
 
-def lock_pending_transactions(db: Connection[DictRow], currency_id: UUID) -> list[dict[str, Any]]:
-    return db.execute(
+def cancel_pending(db: Connection[DictRow], currency_ids: frozenset[UUID], now: datetime) -> None:
+    plan = LockPlan(currency_ids, lambda lock: find_pending(db, currency_ids, lock))
+    for transaction in lock_currencies_first(db, plan):
+        cancelled = undo_transaction(db, transaction, "Cancelled", now)
+        enqueue_webhook(db, cancelled, "cancelled", now)
+
+
+def find_pending(db: Connection[DictRow], currency_ids: frozenset[UUID], lock: sql.Composable) -> list[dict[str, Any]]:
+    query = sql.SQL(
         """
-        SELECT id, user_id, from_currency_id, to_currency_id, amount, payout, status, submitted_at, handled_at
-        FROM transactions
-        WHERE status = 'Pending' AND (from_currency_id = %(id)s OR to_currency_id = %(id)s)
-        ORDER BY submitted_at DESC, id DESC
-        FOR UPDATE
-        """,
-        {"id": currency_id},
-    ).fetchall()
+        SELECT t.id, t.user_id, t.from_currency_id, t.to_currency_id, t.amount, t.payout, t.status,
+            t.submitted_at, t.handled_at
+        FROM transactions t
+        WHERE t.status = 'Pending' AND (t.from_currency_id = ANY(%(ids)s) OR t.to_currency_id = ANY(%(ids)s))
+        ORDER BY t.submitted_at DESC, t.id DESC
+        {lock}
+        """
+    ).format(lock=lock)
+
+    return db.execute(query, {"ids": list(currency_ids)}).fetchall()

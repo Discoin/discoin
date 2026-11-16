@@ -14,8 +14,20 @@ DEFAULT_PAGE_SIZE = 50
 LARGEST_PAGE_SIZE = 100
 
 TRANSACTION_COLUMNS = """
-    id, from_currency_id, to_currency_id, amount, payout, status, submitted_at, handled_at
+    t.id, t.user_id, t.from_currency_id, t.to_currency_id, t.amount, t.payout, t.status, t.submitted_at, t.handled_at,
+    json_build_object('abbreviation', f.abbreviation, 'name', f.name, 'removed', f.removed_at IS NOT NULL)
+        AS from_currency,
+    json_build_object('abbreviation', o.abbreviation, 'name', o.name, 'removed', o.removed_at IS NOT NULL)
+        AS to_currency
 """
+CURRENCY_JOINS = """
+    JOIN currencies f ON f.id = t.from_currency_id
+    JOIN currencies o ON o.id = t.to_currency_id
+"""
+
+
+def returning_with_currencies(statement: str) -> str:
+    return f"WITH t AS ({statement} RETURNING *) SELECT {TRANSACTION_COLUMNS} FROM t {CURRENCY_JOINS}"
 
 
 @dataclass(frozen=True)
@@ -43,27 +55,27 @@ def list_currency_transactions(db: Connection[DictRow], currency_id: UUID, page:
 
     return fetch_page(
         db,
-        "(from_currency_id = %(currency_id)s OR to_currency_id = %(currency_id)s)",
+        "(t.from_currency_id = %(currency_id)s OR t.to_currency_id = %(currency_id)s)",
         {"currency_id": currency_id},
         page,
     )
 
 
 def list_user_transactions(db: Connection[DictRow], user_id: str, page: Page) -> list[Transaction]:
-    return fetch_page(db, "user_id = %(user_id)s", {"user_id": user_id}, page)
+    return fetch_page(db, "t.user_id = %(user_id)s", {"user_id": user_id}, page)
 
 
 def fetch_page(db: Connection[DictRow], condition: str, parameters: dict[str, Any], page: Page) -> list[Transaction]:
     require_cursor_exists(db, page.before)
     rows = db.execute(
         f"""
-        SELECT {TRANSACTION_COLUMNS} FROM transactions
+        SELECT {TRANSACTION_COLUMNS} FROM transactions t {CURRENCY_JOINS}
         WHERE {condition}
             AND (
                 %(before)s::uuid IS NULL
-                OR (submitted_at, id) < (SELECT submitted_at, id FROM transactions WHERE id = %(before)s)
+                OR (t.submitted_at, t.id) < (SELECT submitted_at, id FROM transactions WHERE id = %(before)s)
             )
-        ORDER BY submitted_at DESC, id DESC
+        ORDER BY t.submitted_at DESC, t.id DESC
         LIMIT %(limit)s
         """,
         {**parameters, "before": page.before, "limit": page.limit},
@@ -81,14 +93,22 @@ def require_cursor_exists(db: Connection[DictRow], before: UUID | None) -> None:
         raise ApiError(400, "No transaction with that ID to page from.", "before")
 
 
-def list_pending_for(db: Connection[DictRow], currency_id: UUID) -> list[BotTransaction]:
+def list_pending_into_currency(db: Connection[DictRow], currency_id: UUID) -> list[BotTransaction]:
+    return list_pending_where(db, "t.to_currency_id = %s", currency_id)
+
+
+def list_pending_into_bot(db: Connection[DictRow], bot_id: UUID) -> list[BotTransaction]:
+    return list_pending_where(db, "o.bot_id = %s", bot_id)
+
+
+def list_pending_where(db: Connection[DictRow], condition: str, value: UUID) -> list[BotTransaction]:
     rows = db.execute(
         f"""
-        SELECT user_id, {TRANSACTION_COLUMNS} FROM transactions
-        WHERE to_currency_id = %s AND status = 'Pending'
-        ORDER BY submitted_at, id
+        SELECT {TRANSACTION_COLUMNS} FROM transactions t {CURRENCY_JOINS}
+        WHERE {condition} AND t.status = 'Pending'
+        ORDER BY t.submitted_at, t.id
         """,
-        (currency_id,),
+        (value,),
     ).fetchall()
 
     return [BotTransaction.model_validate(row) for row in rows]

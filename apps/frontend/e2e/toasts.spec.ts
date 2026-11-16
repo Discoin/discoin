@@ -55,9 +55,7 @@ test("adding a currency shows a toast", async ({ page }) => {
   await dialog.getByLabel("Currency name").fill("Shells");
   await dialog.getByLabel("Abbreviation").fill("SHL");
   await dialog.getByLabel("Weekly income median").fill("50000");
-  await dialog
-    .getByLabel("Owner ID")
-    .fill("412358906715234305");
+  await dialog.getByLabel("Bot").selectOption({ label: "Harvest bot" });
   await dialog.getByRole("button", { name: "Add currency" }).click();
 
   await expect(toast(page, "Added Shells (SHL).")).toBeVisible();
@@ -72,7 +70,7 @@ test("blocking a user shows a toast", async ({ page }) => {
   await dialog.getByRole("button", { name: "Block user" }).click();
 
   await expect(
-    toast(page, "Blocked 700000000000000001 from OAT."),
+    toast(page, "Blocked 700000000000000001 from Harvest bot."),
   ).toBeVisible();
 });
 

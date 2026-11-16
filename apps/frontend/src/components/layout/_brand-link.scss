@@ -1,0 +1,9 @@
+@mixin brand-link {
+  color: var(--ink);
+  font-family: var(--font-figure);
+  font-stretch: 112.5%;
+  font-weight: 800;
+  font-size: var(--text-lg);
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}

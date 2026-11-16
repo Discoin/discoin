@@ -1,4 +1,5 @@
 import re
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -8,6 +9,7 @@ from uuid import UUID
 from psycopg import Connection
 from psycopg.rows import DictRow
 
+from app.core.database import unique_as_field_error
 from app.core.errors import ApiError, not_found
 from app.core.validation import checked_text
 from app.currencies.curve import CurveSide, value
@@ -18,7 +20,8 @@ HISTORY_DAYS = (7, 30)
 
 CURRENCY_QUERY = """
     SELECT
-        c.id, c.abbreviation, c.name, c.reserve, c.worth, c.active, c.weekly_median, c.owner_id,
+        c.id, c.abbreviation, c.name, c.reserve, c.worth, c.active, c.weekly_median, c.multiplier, c.bot_id,
+        b.name AS bot_name,
         (
             SELECT h.value FROM currency_history h
             WHERE h.currency_id = c.id AND h.recorded_at <= %(day_ago)s
@@ -38,6 +41,7 @@ CURRENCY_QUERY = """
             FROM generate_series(%(sparkline_start)s::timestamptz, %(now)s::timestamptz, interval '1 day') AS point
         ) AS value_history
     FROM currencies c
+    LEFT JOIN bots b ON b.id = c.bot_id
 """
 
 
@@ -49,10 +53,8 @@ def list_all_currencies(db: Connection[DictRow], now: datetime) -> list[Currency
     return [to_currency(row) for row in fetch_currency_rows(db, "true", {}, now)]
 
 
-def list_owned_currencies(db: Connection[DictRow], owner_id: str, now: datetime) -> list[Currency]:
-    rows = fetch_currency_rows(db, "c.owner_id = %(owner_id)s", {"owner_id": owner_id}, now)
-
-    return [to_currency(row) for row in rows]
+def list_owned_currency_rows(db: Connection[DictRow], owner_id: str, now: datetime) -> list[dict[str, Any]]:
+    return fetch_currency_rows(db, "b.owner_id = %(owner_id)s", {"owner_id": owner_id}, now)
 
 
 def find_currency_by_abbreviation(db: Connection[DictRow], abbreviation: str, now: datetime) -> Currency:
@@ -80,7 +82,7 @@ def fetch_currency_rows(
     db: Connection[DictRow], condition: str, parameters: dict[str, Any], now: datetime
 ) -> list[dict[str, Any]]:
     return db.execute(
-        f"{CURRENCY_QUERY} WHERE {condition} ORDER BY c.abbreviation",
+        f"{CURRENCY_QUERY} WHERE c.removed_at IS NULL AND ({condition}) ORDER BY c.abbreviation",
         {**currency_query_times(now), **parameters},
     ).fetchall()
 
@@ -136,7 +138,7 @@ def reserve_history(db: Connection[DictRow], currency_id: UUID, days: int, now: 
 
 
 def require_currency_exists(db: Connection[DictRow], currency_id: UUID) -> None:
-    row = db.execute("SELECT 1 FROM currencies WHERE id = %s", (currency_id,)).fetchone()
+    row = db.execute("SELECT 1 FROM currencies WHERE id = %s AND removed_at IS NULL", (currency_id,)).fetchone()
     if row is None:
         raise not_found("currency")
 
@@ -145,13 +147,15 @@ def record_history(db: Connection[DictRow], currency_id: UUID, reserve: Decimal,
     db.execute(
         """
         INSERT INTO currency_history (currency_id, reserve, value, recorded_at)
-        SELECT id, %(reserve)s, worth / %(reserve)s, %(at)s FROM currencies WHERE id = %(currency_id)s
+        SELECT id, %(reserve)s, worth / %(reserve)s, %(at)s FROM currencies
+        WHERE id = %(currency_id)s AND removed_at IS NULL
         """,
         {"currency_id": currency_id, "reserve": reserve, "at": at},
     )
 
 
 ABBREVIATION_PATTERN = re.compile(r"^[A-Z]{3,4}$")
+ABBREVIATION_INDEX = "currencies_abbreviation"
 
 
 @dataclass(frozen=True)
@@ -168,15 +172,24 @@ def checked_details(
     if not ABBREVIATION_PATTERN.fullmatch(checked_abbreviation):
         raise ApiError(400, "Use 3 or 4 letters, A to Z, for the abbreviation.", "abbreviation")
 
-    taken = db.execute(
-        "SELECT 1 FROM currencies WHERE abbreviation = %s AND id IS DISTINCT FROM %s",
-        (checked_abbreviation, excluding_id),
-    ).fetchone()
-    if taken is not None:
-        raise ApiError(
-            409,
-            f"{checked_abbreviation} is taken by another currency. Pick a different abbreviation.",
-            "abbreviation",
-        )
+    if abbreviation_in_use(db, checked_abbreviation, excluding_id):
+        raise abbreviation_taken(checked_abbreviation)
 
     return CurrencyDetails(name=checked_name, abbreviation=checked_abbreviation)
+
+
+def abbreviation_in_use(db: Connection[DictRow], abbreviation: str, excluding_id: UUID | None) -> bool:
+    row = db.execute(
+        "SELECT 1 FROM currencies WHERE abbreviation = %s AND id IS DISTINCT FROM %s AND removed_at IS NULL",
+        (abbreviation, excluding_id),
+    ).fetchone()
+
+    return row is not None
+
+
+def claiming_abbreviation(abbreviation: str) -> AbstractContextManager[None]:
+    return unique_as_field_error(ABBREVIATION_INDEX, abbreviation_taken(abbreviation))
+
+
+def abbreviation_taken(abbreviation: str) -> ApiError:
+    return ApiError(409, f"{abbreviation} is taken by another currency. Pick a different abbreviation.", "abbreviation")

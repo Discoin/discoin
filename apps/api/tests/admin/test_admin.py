@@ -1,14 +1,26 @@
 from decimal import Decimal
 from uuid import UUID
 
+import httpx
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
 from app.transactions.ledger import create_transaction as create_ledger_transaction
-from tests.factories import FIRST_ADMIN_ID, NOW, OWNER_ID, USER_ID, create_currency, deactivate, log_in
+from tests.factories import (
+    FIRST_ADMIN_ID,
+    NOW,
+    OWNER_ID,
+    USER_ID,
+    bot_of,
+    create_bot,
+    create_botless_currency,
+    create_currency,
+    deactivate,
+    log_in,
+)
 
-NEW_CURRENCY = {"name": "Oats", "abbreviation": "oat", "weeklyMedian": 25_000, "ownerId": OWNER_ID}
+TOO_LARGE_MULTIPLIER = 10_000_000_000
 
 
 @pytest.fixture
@@ -16,17 +28,48 @@ def as_admin(client: TestClient, connection: psycopg.Connection) -> None:
     log_in(client, connection, FIRST_ADMIN_ID)
 
 
-def test_admin_adds_a_currency_with_a_starting_reserve(client: TestClient, as_admin: None) -> None:
-    response = client.post("/admin/currencies", json=NEW_CURRENCY)
+@pytest.fixture
+def bot_id(connection: psycopg.Connection) -> UUID:
+    return create_bot(connection)
+
+
+@pytest.fixture
+def new_currency(bot_id: UUID) -> dict:
+    return {"name": "Oats", "abbreviation": "oat", "weeklyMedian": 25_000, "multiplier": 10, "botId": str(bot_id)}
+
+
+def count_currencies(connection: psycopg.Connection) -> int:
+    return connection.execute("SELECT count(*) AS currencies FROM currencies").fetchone()["currencies"]
+
+
+def count_history(connection: psycopg.Connection, currency_id: UUID) -> int:
+    row = connection.execute(
+        "SELECT count(*) AS points FROM currency_history WHERE currency_id = %s", (currency_id,)
+    ).fetchone()
+
+    return row["points"]
+
+
+def test_admin_adds_a_currency_with_a_starting_reserve(
+    client: TestClient, as_admin: None, new_currency: dict, bot_id: UUID
+) -> None:
+    response = client.post("/admin/currencies", json=new_currency)
 
     added = response.json()
     assert response.status_code == 201
     assert added["weeklyMedian"] == 25_000
-    assert added["ownerId"] == OWNER_ID
+    assert added["multiplier"] == 10
+    assert added["bot"]["id"] == str(bot_id)
     assert added["currency"]["abbreviation"] == "OAT"
-    assert added["currency"]["reserve"] == 100_000
-    assert added["currency"]["valueHistory"] == [1.0]
+    assert added["currency"]["reserve"] == 250_000
+    assert added["currency"]["valueHistory"] == [0.4]
     assert client.get("/currencies/OAT").status_code == 200
+
+
+def test_add_floors_the_starting_reserve_to_cents(client: TestClient, as_admin: None, new_currency: dict) -> None:
+    response = client.post("/admin/currencies", json={**new_currency, "weeklyMedian": 0.15, "multiplier": 0.15})
+
+    assert (response.json()["multiplier"], response.json()["currency"]["reserve"]) == (0.15, 0.02)
 
 
 @pytest.mark.parametrize(
@@ -39,44 +82,76 @@ def test_admin_adds_a_currency_with_a_starting_reserve(client: TestClient, as_ad
         ({"abbreviation": "OA7"}, "abbreviation"),
         ({"weeklyMedian": 0}, "weeklyMedian"),
         ({"weeklyMedian": 1_000_000_001}, "weeklyMedian"),
-        ({"ownerId": "42"}, "ownerId"),
+        ({"multiplier": 0}, "multiplier"),
+        ({"multiplier": -4}, "multiplier"),
+        ({"multiplier": 1.234}, "multiplier"),
+        ({"multiplier": TOO_LARGE_MULTIPLIER}, "multiplier"),
+        ({"weeklyMedian": 0.01, "multiplier": 0.01}, "multiplier"),
+        ({"botId": None}, "botId"),
     ],
 )
 def test_add_checks_every_field(
-    client: TestClient, connection: psycopg.Connection, as_admin: None, changes: dict, field: str
+    client: TestClient, connection: psycopg.Connection, as_admin: None, new_currency: dict, changes: dict, field: str
 ) -> None:
-    response = client.post("/admin/currencies", json={**NEW_CURRENCY, **changes})
+    response = client.post("/admin/currencies", json={**new_currency, **changes})
 
     assert (response.status_code, response.json()["field"]) == (400, field)
-    assert connection.execute("SELECT count(*) AS currencies FROM currencies").fetchone()["currencies"] == 0
+    assert count_currencies(connection) == 0
 
 
-def test_add_stores_the_code_in_capitals_and_finds_it_in_any_case(client: TestClient, as_admin: None) -> None:
-    client.post("/admin/currencies", json={**NEW_CURRENCY, "abbreviation": "pBlz"})
+@pytest.mark.parametrize("missing", ["multiplier", "botId"])
+def test_add_needs_a_multiplier_and_a_bot(
+    client: TestClient, connection: psycopg.Connection, as_admin: None, new_currency: dict, missing: str
+) -> None:
+    without = {key: value for key, value in new_currency.items() if key != missing}
+
+    response = client.post("/admin/currencies", json=without)
+
+    assert (response.status_code, response.json()["field"]) == (400, missing)
+    assert count_currencies(connection) == 0
+
+
+def test_add_refuses_an_unknown_bot(
+    client: TestClient, connection: psycopg.Connection, as_admin: None, new_currency: dict
+) -> None:
+    response = client.post("/admin/currencies", json={**new_currency, "botId": "019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"})
+
+    assert (response.status_code, response.json()["field"]) == (404, "botId")
+    assert count_currencies(connection) == 0
+
+
+def test_add_stores_the_code_in_capitals_and_finds_it_in_any_case(
+    client: TestClient, as_admin: None, new_currency: dict
+) -> None:
+    client.post("/admin/currencies", json={**new_currency, "abbreviation": "pBlz"})
 
     assert client.get("/currencies/pblz").json()["abbreviation"] == "PBLZ"
 
 
-def test_add_rejects_a_taken_abbreviation(client: TestClient, connection: psycopg.Connection, as_admin: None) -> None:
+def test_add_rejects_a_taken_abbreviation(
+    client: TestClient, connection: psycopg.Connection, as_admin: None, new_currency: dict
+) -> None:
     create_currency(connection, "OAT", 100_000)
 
-    response = client.post("/admin/currencies", json=NEW_CURRENCY)
+    response = client.post("/admin/currencies", json=new_currency)
 
     assert (response.status_code, response.json()["field"]) == (409, "abbreviation")
 
 
-def test_admin_lists_every_currency_with_median_and_owner(
+def test_admin_lists_every_currency_with_median_and_bot(
     client: TestClient, connection: psycopg.Connection, as_admin: None
 ) -> None:
     hidden = create_currency(connection, "OFF", 100_000)
     deactivate(connection, hidden)
-    create_currency(connection, "OAT", 100_000)
+    oats = create_currency(connection, "OAT", 100_000)
 
     listed = client.get("/admin/currencies").json()
 
-    assert [(row["currency"]["abbreviation"], row["weeklyMedian"], row["ownerId"]) for row in listed] == [
-        ("OAT", 25_000, OWNER_ID),
-        ("OFF", 25_000, OWNER_ID),
+    assert [
+        (row["currency"]["abbreviation"], row["weeklyMedian"], row["multiplier"], row["bot"]["id"]) for row in listed
+    ] == [
+        ("OAT", 25_000, 4, str(bot_of(connection, oats))),
+        ("OFF", 25_000, 4, str(bot_of(connection, hidden))),
     ]
 
 
@@ -85,31 +160,143 @@ def test_new_median_resets_the_reserve(client: TestClient, connection: psycopg.C
 
     response = client.patch(f"/admin/currencies/{currency_id}", json={"weeklyMedian": 50_000})
 
-    assert response.json()["currency"]["reserve"] == 200_000
-    assert response.json()["weeklyMedian"] == 50_000
-    assert response.json()["ownerId"] == OWNER_ID
+    entry = saved(response)
+    assert entry["currency"]["reserve"] == 200_000
+    assert entry["weeklyMedian"] == 50_000
+    assert entry["bot"]["id"] == str(bot_of(connection, currency_id))
     history = client.get(f"/currencies/{currency_id}/history", params={"days": 7}).json()
     assert history[-1] == {"at": "2026-11-13T12:00:00Z", "reserve": 200_000.0}
 
 
-def test_new_owner_keeps_the_reserve(client: TestClient, connection: psycopg.Connection, as_admin: None) -> None:
-    currency_id = create_currency(connection, "OAT", 123_456)
+def test_new_median_resets_with_the_currencys_own_multiplier(
+    client: TestClient, connection: psycopg.Connection, as_admin: None
+) -> None:
+    currency_id = create_currency(connection, "OAT", 100_000)
+    connection.execute("UPDATE currencies SET multiplier = 10 WHERE id = %s", (currency_id,))
 
-    response = client.patch(f"/admin/currencies/{currency_id}", json={"ownerId": USER_ID})
+    response = client.patch(f"/admin/currencies/{currency_id}", json={"weeklyMedian": 50_000})
 
-    assert (response.json()["ownerId"], response.json()["currency"]["reserve"]) == (USER_ID, 123_456)
+    assert (saved(response)["multiplier"], saved(response)["currency"]["reserve"]) == (10, 500_000)
+    assert count_history(connection, currency_id) == 2
 
 
-def test_edit_saves_nothing_when_one_field_is_bad(
+def test_new_multiplier_alone_resets_the_reserve(
     client: TestClient, connection: psycopg.Connection, as_admin: None
 ) -> None:
     currency_id = create_currency(connection, "OAT", 100_000)
 
-    response = client.patch(f"/admin/currencies/{currency_id}", json={"ownerId": USER_ID, "weeklyMedian": -1})
+    response = client.patch(f"/admin/currencies/{currency_id}", json={"multiplier": 10})
 
-    stored = connection.execute("SELECT owner_id, reserve FROM currencies").fetchone()
+    assert response.status_code == 200
+    assert (saved(response)["weeklyMedian"], saved(response)["multiplier"]) == (25_000, 10)
+    assert saved(response)["currency"]["reserve"] == 250_000
+    assert count_history(connection, currency_id) == 2
+
+
+def test_new_median_and_multiplier_reset_the_reserve_once(
+    client: TestClient, connection: psycopg.Connection, as_admin: None
+) -> None:
+    currency_id = create_currency(connection, "OAT", 100_000)
+
+    response = client.patch(f"/admin/currencies/{currency_id}", json={"weeklyMedian": 30_000, "multiplier": 5})
+
+    assert saved(response)["currency"]["reserve"] == 150_000
+    assert count_history(connection, currency_id) == 2
+
+
+@pytest.mark.parametrize(
+    ("changes", "field"),
+    [
+        ({"multiplier": 0}, "multiplier"),
+        ({"multiplier": 1.234}, "multiplier"),
+        ({"multiplier": TOO_LARGE_MULTIPLIER}, "multiplier"),
+        ({"weeklyMedian": 0.01, "multiplier": 0.01}, "multiplier"),
+        ({"weeklyMedian": 1_000_000_000, "multiplier": 1_000_000}, "multiplier"),
+    ],
+)
+def test_edit_checks_the_multiplier(
+    client: TestClient, connection: psycopg.Connection, as_admin: None, changes: dict, field: str
+) -> None:
+    currency_id = create_currency(connection, "OAT", 100_000)
+
+    response = client.patch(f"/admin/currencies/{currency_id}", json=changes)
+
+    stored = connection.execute("SELECT reserve, weekly_median, multiplier FROM currencies").fetchone()
+    assert (response.status_code, response.json()["field"]) == (400, field)
+    assert stored == {"reserve": 100_000, "weekly_median": 25_000, "multiplier": 4}
+
+
+@pytest.mark.parametrize(
+    ("changes", "field"),
+    [
+        ({"weeklyMedian": 50_000, "multiplier": None}, "multiplier"),
+        ({"multiplier": None}, "multiplier"),
+        ({"active": False, "weeklyMedian": None}, "weeklyMedian"),
+    ],
+)
+def test_edit_refuses_a_cleared_median_or_multiplier(
+    client: TestClient, connection: psycopg.Connection, as_admin: None, changes: dict, field: str
+) -> None:
+    currency_id = create_currency(connection, "OAT", 100_000)
+
+    response = client.patch(f"/admin/currencies/{currency_id}", json=changes)
+
+    stored = connection.execute("SELECT active, reserve, weekly_median, multiplier FROM currencies").fetchone()
+    assert (response.status_code, response.json()["field"]) == (400, field)
+    assert stored == {"active": True, "reserve": 100_000, "weekly_median": 25_000, "multiplier": 4}
+
+
+def test_edit_blames_the_median_when_only_the_median_breaks_the_reserve(
+    client: TestClient, connection: psycopg.Connection, as_admin: None
+) -> None:
+    currency_id = create_currency(connection, "OAT", 100_000)
+    connection.execute("UPDATE currencies SET multiplier = 1000000 WHERE id = %s", (currency_id,))
+
+    response = client.patch(f"/admin/currencies/{currency_id}", json={"weeklyMedian": 1_000_000_000})
+
     assert (response.status_code, response.json()["field"]) == (400, "weeklyMedian")
-    assert stored == {"owner_id": OWNER_ID, "reserve": 100_000}
+
+
+def test_bad_multiplier_keeps_the_currency_active(
+    client: TestClient, connection: psycopg.Connection, as_admin: None
+) -> None:
+    oats = create_currency(connection, "OAT", 1_000_000)
+    gems = create_currency(connection, "GEM", 1_000_000)
+    pending = create_ledger_transaction(connection, USER_ID, gems, oats, Decimal(1000), NOW)["id"]
+
+    response = client.patch(f"/admin/currencies/{oats}", json={"active": False, "multiplier": 0.001})
+
+    stored = connection.execute("SELECT active, multiplier FROM currencies WHERE id = %s", (oats,)).fetchone()
+    status = connection.execute("SELECT status FROM transactions WHERE id = %s", (pending,)).fetchone()
+    assert (response.status_code, response.json()["field"]) == (400, "multiplier")
+    assert stored == {"active": True, "multiplier": 4}
+    assert status == {"status": "Pending"}
+
+
+def test_deactivating_with_a_new_multiplier_resets_the_reserve_last(
+    client: TestClient, connection: psycopg.Connection, as_admin: None
+) -> None:
+    oats = create_currency(connection, "OAT", 1_000_000)
+    gems = create_currency(connection, "GEM", 1_000_000)
+    pending = create_ledger_transaction(connection, USER_ID, gems, oats, Decimal(1000), NOW)["id"]
+
+    response = client.patch(f"/admin/currencies/{oats}", json={"active": False, "multiplier": 10})
+
+    status = connection.execute("SELECT status FROM transactions WHERE id = %s", (pending,)).fetchone()
+    assert status == {"status": "Cancelled"}
+    assert saved(response)["currency"]["reserve"] == 2_500_000
+
+
+def test_edit_saves_nothing_when_one_field_is_bad(
+    client: TestClient, connection: psycopg.Connection, as_admin: None, bot_id: UUID
+) -> None:
+    currency_id = create_botless_currency(connection, "OAT", 100_000)
+
+    response = client.patch(f"/admin/currencies/{currency_id}", json={"botId": str(bot_id), "weeklyMedian": -1})
+
+    stored = connection.execute("SELECT bot_id, reserve FROM currencies").fetchone()
+    assert (response.status_code, response.json()["field"]) == (400, "weeklyMedian")
+    assert stored == {"bot_id": None, "reserve": 100_000}
 
 
 def test_edit_needs_a_change(client: TestClient, connection: psycopg.Connection, as_admin: None) -> None:
@@ -171,6 +358,13 @@ def test_removing_a_non_admin_is_404(client: TestClient, as_admin: None) -> None
         ("GET", "/admin/currencies"),
         ("POST", "/admin/currencies"),
         ("PATCH", "/admin/currencies/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"),
+        ("GET", "/admin/currencies/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21/removal"),
+        ("DELETE", "/admin/currencies/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"),
+        ("GET", "/admin/bots"),
+        ("POST", "/admin/bots"),
+        ("PATCH", "/admin/bots/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"),
+        ("GET", "/admin/bots/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21/removal"),
+        ("DELETE", "/admin/bots/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"),
         ("GET", "/admin/admins"),
         ("POST", "/admin/admins"),
         ("DELETE", f"/admin/admins/{USER_ID}"),
@@ -193,9 +387,9 @@ def test_removed_admin_loses_access(client: TestClient, connection: psycopg.Conn
 
 
 def test_history_point_is_recorded_when_added(
-    client: TestClient, connection: psycopg.Connection, as_admin: None
+    client: TestClient, connection: psycopg.Connection, as_admin: None, new_currency: dict
 ) -> None:
-    added = client.post("/admin/currencies", json=NEW_CURRENCY).json()
+    added = client.post("/admin/currencies", json=new_currency).json()
     currency_id = UUID(added["currency"]["id"])
 
     points = connection.execute(
@@ -215,7 +409,7 @@ def test_edit_can_deactivate_and_cancels_pending(
     response = client.patch(f"/admin/currencies/{oats}", json={"active": False})
 
     status = connection.execute("SELECT status FROM transactions WHERE id = %s", (pending,)).fetchone()
-    assert response.json()["currency"]["active"] is False
+    assert saved(response)["currency"]["active"] is False
     assert status == {"status": "Cancelled"}
 
 
@@ -223,7 +417,7 @@ def test_edit_can_reactivate(client: TestClient, connection: psycopg.Connection,
     currency_id = create_currency(connection, "OAT", 100_000)
     deactivate(connection, currency_id)
 
-    assert client.patch(f"/admin/currencies/{currency_id}", json={"active": True}).json()["currency"]["active"]
+    assert saved(client.patch(f"/admin/currencies/{currency_id}", json={"active": True}))["currency"]["active"]
 
 
 def test_edit_with_the_current_status_changes_nothing(
@@ -233,16 +427,23 @@ def test_edit_with_the_current_status_changes_nothing(
 
     response = client.patch(f"/admin/currencies/{currency_id}", json={"active": True})
 
-    assert (response.status_code, response.json()["currency"]["active"]) == (200, True)
+    assert (response.status_code, saved(response)["currency"]["active"]) == (200, True)
 
 
-def test_status_and_owner_save_together_or_not_at_all(
+def test_status_and_bot_save_together_or_not_at_all(
     client: TestClient, connection: psycopg.Connection, as_admin: None
 ) -> None:
-    currency_id = create_currency(connection, "OAT", 100_000)
+    currency_id = create_botless_currency(connection, "OAT", 100_000)
 
-    response = client.patch(f"/admin/currencies/{currency_id}", json={"active": False, "ownerId": "12"})
+    response = client.patch(
+        f"/admin/currencies/{currency_id}",
+        json={"active": False, "botId": "019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"},
+    )
 
-    stored = connection.execute("SELECT active, owner_id FROM currencies").fetchone()
-    assert (response.status_code, response.json()["field"]) == (400, "ownerId")
-    assert stored == {"active": True, "owner_id": OWNER_ID}
+    stored = connection.execute("SELECT active, bot_id FROM currencies").fetchone()
+    assert (response.status_code, response.json()["field"]) == (404, "botId")
+    assert stored == {"active": True, "bot_id": None}
+
+
+def saved(response: httpx.Response) -> dict:
+    return response.json()["saved"]

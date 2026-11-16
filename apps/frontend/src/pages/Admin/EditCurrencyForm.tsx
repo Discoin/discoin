@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../../api/client.js";
-import type { AdminCurrency, CurrencyChanges } from "../../api/types.js";
+import type {
+  AdminBot,
+  AdminCurrency,
+  CurrencyChanges,
+  SavedCurrency,
+} from "../../api/types.js";
 import { ActionStatus } from "../../components/shared/ActionStatus.jsx";
 import { Button } from "../../components/shared/Button.jsx";
 import { Field } from "../../components/shared/Field.jsx";
@@ -8,31 +13,40 @@ import { Notice } from "../../components/shared/Notice.jsx";
 import { Switch } from "../../components/shared/Switch.jsx";
 import { parseAmount } from "../../lib/converter.js";
 import { startingReserve } from "../../lib/exchange.js";
-import { formatAmount } from "../../lib/format.js";
+import {
+  formatAmount,
+  formatBlockCount,
+  formatMultiplier,
+} from "../../lib/format.js";
 import { useAction } from "../../lib/useAction.js";
+import { BotSelect, NO_BOT_PICKED, pickedBot } from "./BotSelect.jsx";
+import { RESERVE_TOO_SMALL } from "./CurrencyForms.jsx";
 
 type Step = "edit" | "review";
 
 interface EditCurrencyFormProps {
   entry: AdminCurrency;
-  onSaved: (updated: AdminCurrency) => void;
+  bots: AdminBot[];
+  onSaved: (updated: AdminCurrency) => Promise<void>;
   onCancel: () => void;
 }
 
 interface FormValues {
-  ownerText: string;
+  botId: string;
   medianText: string;
+  multiplierText: string;
   active: boolean;
 }
 
 function changesOf(entry: AdminCurrency, values: FormValues): CurrencyChanges {
   const changes: CurrencyChanges = {};
-  if (values.ownerText.trim() !== entry.ownerId) {
-    changes.ownerId = values.ownerText;
-  }
+  const botId = pickedBot(values.botId);
+  if (botId !== null) changes.botId = botId;
 
   const median = parseAmount(values.medianText);
+  const multiplier = parseAmount(values.multiplierText);
   if (median !== entry.weeklyMedian) changes.weeklyMedian = median;
+  if (multiplier !== entry.multiplier) changes.multiplier = multiplier;
   if (values.active !== entry.currency.active) changes.active = values.active;
 
   return changes;
@@ -40,6 +54,12 @@ function changesOf(entry: AdminCurrency, values: FormValues): CurrencyChanges {
 
 function hasChanges(changes: CurrencyChanges): boolean {
   return Object.keys(changes).length > 0;
+}
+
+function onlyAssignsBot(changes: CurrencyChanges): boolean {
+  const changed = Object.keys(changes);
+
+  return changed.length === 1 && changed[0] === "botId";
 }
 
 function saveLabel(resetsReserve: boolean, deactivates: boolean): string {
@@ -50,18 +70,35 @@ function saveLabel(resetsReserve: boolean, deactivates: boolean): string {
   return "Save changes";
 }
 
+function savedMessage(abbreviation: string, result: SavedCurrency): string {
+  const { saved, movedBlocks } = result;
+  if (movedBlocks === 0 || saved.bot === null) return `Saved ${abbreviation}.`;
+
+  return `Saved ${abbreviation}. Moved ${formatBlockCount(movedBlocks)} to ${saved.bot.name}.`;
+}
+
 export function EditCurrencyForm({
   entry,
+  bots,
   onSaved,
   onCancel,
 }: EditCurrencyFormProps) {
-  const [ownerText, setOwnerText] = useState(entry.ownerId);
+  const [botId, setBotId] = useState(NO_BOT_PICKED);
   const [medianText, setMedianText] = useState(String(entry.weeklyMedian));
+  const [multiplierText, setMultiplierText] = useState(
+    String(entry.multiplier),
+  );
   const [active, setActive] = useState(entry.currency.active);
   const [step, setStep] = useState<Step>("edit");
   const action = useAction();
   const formRef = useRef<HTMLFormElement>(null);
-  const changes = changesOf(entry, { ownerText, medianText, active });
+  const changes = changesOf(entry, {
+    botId,
+    medianText,
+    multiplierText,
+    active,
+  });
+  const savesDirectly = onlyAssignsBot(changes);
   const { abbreviation } = entry.currency;
 
   useEffect(() => {
@@ -82,10 +119,10 @@ export function EditCurrencyForm({
 
   function save() {
     void action.run(async () => {
-      const updated = await api.updateCurrency(entry.currency.id, changes);
-      onSaved(updated);
+      const result = await api.updateCurrency(entry.currency.id, changes);
+      await onSaved(result.saved);
 
-      return `Saved ${abbreviation}.`;
+      return savedMessage(abbreviation, result);
     });
   }
 
@@ -95,19 +132,25 @@ export function EditCurrencyForm({
       class="form-stack"
       onSubmit={(event) => {
         event.preventDefault();
-        setStep("review");
+        if (savesDirectly) save();
+        else setStep("review");
       }}
     >
       {step === "edit" ? (
         <>
-          <Field
-            label="Owner ID"
-            inputMode="numeric"
-            autoComplete="off"
-            value={ownerText}
-            error={action.fieldError("ownerId")}
-            onInput={(event) => setOwnerText(event.currentTarget.value)}
-          />
+          {entry.bot === null ? (
+            <BotSelect
+              bots={bots}
+              value={botId}
+              error={action.fieldError("botId")}
+              onChange={setBotId}
+            />
+          ) : (
+            <dl class="edit-form__fixed">
+              <dt>Bot</dt>
+              <dd>{entry.bot.name}</dd>
+            </dl>
+          )}
           <Field
             label="Weekly income median"
             inputMode="decimal"
@@ -117,6 +160,15 @@ export function EditCurrencyForm({
             hint="Changing it resets the reserve."
             error={action.fieldError("weeklyMedian")}
             onInput={(event) => setMedianText(event.currentTarget.value)}
+          />
+          <Field
+            label="Reserve multiplier"
+            inputMode="decimal"
+            autoComplete="off"
+            value={multiplierText}
+            hint="Changing it resets the reserve to the weekly median times this."
+            error={action.fieldError("multiplier")}
+            onInput={(event) => setMultiplierText(event.currentTarget.value)}
           />
           <div class="edit-form__status">
             <Switch label="Active" checked={active} onChange={setActive} />
@@ -130,9 +182,11 @@ export function EditCurrencyForm({
             <Button
               type="submit"
               variant="primary"
-              disabled={!hasChanges(changes)}
+              disabled={
+                !hasChanges(changes) || action.state.status === "pending"
+              }
             >
-              Review changes
+              {savesDirectly ? "Save changes" : "Review changes"}
             </Button>
             <Button variant="outline" onClick={onCancel}>
               Cancel
@@ -142,8 +196,9 @@ export function EditCurrencyForm({
       ) : (
         <Review
           entry={entry}
+          bots={bots}
           changes={changes}
-          medianText={medianText}
+          texts={{ medianText, multiplierText }}
           pending={action.state.status === "pending"}
           onBack={() => setStep("edit")}
           onSave={save}
@@ -151,32 +206,51 @@ export function EditCurrencyForm({
       )}
       <ActionStatus
         state={action.state}
-        inlineFields={["ownerId", "weeklyMedian"]}
+        inlineFields={["botId", "weeklyMedian", "multiplier"]}
       />
     </form>
   );
 }
 
+interface ReserveTexts {
+  medianText: string;
+  multiplierText: string;
+}
+
 interface ReviewProps {
   entry: AdminCurrency;
+  bots: AdminBot[];
   changes: CurrencyChanges;
-  medianText: string;
+  texts: ReserveTexts;
   pending: boolean;
   onBack: () => void;
   onSave: () => void;
 }
 
+function botNamed(bots: AdminBot[], botId: string): string {
+  const bot = bots.find((candidate) => candidate.id === botId);
+  if (bot === undefined) throw new Error(`Unknown bot "${botId}"`);
+
+  return bot.name;
+}
+
 function Review({
   entry,
+  bots,
   changes,
-  medianText,
+  texts,
   pending,
   onBack,
   onSave,
 }: ReviewProps) {
   const { abbreviation } = entry.currency;
-  const resetsReserve = changes.weeklyMedian !== undefined;
+  const resetsReserve =
+    changes.weeklyMedian !== undefined || changes.multiplier !== undefined;
   const deactivates = changes.active === false;
+  const newTerms = {
+    weeklyMedian: changes.weeklyMedian ?? entry.weeklyMedian,
+    multiplier: changes.multiplier ?? entry.multiplier,
+  };
 
   return (
     <div class="edit-review">
@@ -184,14 +258,14 @@ function Review({
         Review {abbreviation} changes
       </h3>
       <dl class="edit-review__list">
-        {changes.ownerId !== undefined && (
+        {changes.botId !== undefined && (
           <div>
-            <dt>Owner</dt>
-            <dd class="figure">
-              <span>{entry.ownerId}</span>
+            <dt>Bot</dt>
+            <dd>
+              <span>No bot</span>
               <span aria-hidden="true">→</span>
               <span class="visually-hidden"> becomes </span>
-              <OwnerDiff before={entry.ownerId} after={changes.ownerId} />
+              <span>{botNamed(bots, changes.botId)}</span>
             </dd>
           </div>
         )}
@@ -203,8 +277,19 @@ function Review({
               <span aria-hidden="true">→</span>
               <span class="visually-hidden"> becomes </span>
               <span>
-                {newMedianText(changes.weeklyMedian, medianText)} {abbreviation}
+                {typedText(texts.medianText, formatAmount)} {abbreviation}
               </span>
+            </dd>
+          </div>
+        )}
+        {changes.multiplier !== undefined && (
+          <div>
+            <dt>Reserve multiplier</dt>
+            <dd class="figure">
+              <span>{formatMultiplier(entry.multiplier)}</span>
+              <span aria-hidden="true">→</span>
+              <span class="visually-hidden"> becomes </span>
+              <span>{typedText(texts.multiplierText, formatMultiplier)}</span>
             </dd>
           </div>
         )}
@@ -220,15 +305,15 @@ function Review({
           </div>
         )}
       </dl>
-      {changes.ownerId !== undefined && (
+      {changes.botId !== undefined && (
         <p class="edit-review__note">
-          {abbreviation} moves to this person's Bot owner page. Check the
-          underlined digits.
+          {abbreviation} moves to the Bot owner page of this bot's owner, and
+          its blocks move to the bot. The bot can't be changed later.
         </p>
       )}
       {resetsReserve && (
         <Notice tone="warning" title="This resets the reserve">
-          <p>{resetWarning(changes.weeklyMedian, abbreviation)}</p>
+          <p>{resetWarning(newTerms, abbreviation)}</p>
         </Notice>
       )}
       {deactivates && (
@@ -261,32 +346,24 @@ function Review({
   );
 }
 
-function newMedianText(median: number, medianText: string): string {
-  return Number.isFinite(median) ? formatAmount(median) : medianText.trim();
+function typedText(text: string, format: (typed: number) => string): string {
+  const typed = parseAmount(text);
+
+  return Number.isFinite(typed) ? format(typed) : text.trim();
 }
 
-function resetWarning(median: number, abbreviation: string): string {
+interface ReserveTerms {
+  weeklyMedian: number;
+  multiplier: number;
+}
+
+function resetWarning(terms: ReserveTerms, abbreviation: string): string {
   const lostTrades =
     "Trades since the last reset stop counting toward its value.";
-  if (!(median > 0)) return lostTrades;
+  if (!(terms.weeklyMedian > 0 && terms.multiplier > 0)) return lostTrades;
 
-  return `The ${abbreviation} reserve goes to ${formatAmount(startingReserve(median))}. ${lostTrades}`;
-}
+  const reserve = startingReserve(terms.weeklyMedian, terms.multiplier);
+  if (!(reserve > 0)) return RESERVE_TOO_SMALL;
 
-function OwnerDiff({ before, after }: { before: string; after: string }) {
-  const characters = [...after.trim()];
-
-  return (
-    <span>
-      {characters.map((character, index) =>
-        character === before[index] ? (
-          character
-        ) : (
-          <span key={index} class="edit-review__changed">
-            {character}
-          </span>
-        ),
-      )}
-    </span>
-  );
+  return `The ${abbreviation} reserve goes to ${formatAmount(reserve)}. ${lostTrades}`;
 }

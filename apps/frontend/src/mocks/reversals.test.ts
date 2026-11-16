@@ -4,10 +4,11 @@ import type { DiscoinApi } from "../api/client.js";
 import type { ReverseRequest } from "../api/types.js";
 import { reservesAfterUndo } from "../lib/exchange.js";
 import { createMockApi } from "./api.js";
-import { sampleCurrencies } from "./data.js";
+import { sampleBots, sampleCurrencies } from "./data.js";
 import { apiErrorOf, settle } from "./settle.js";
 
-const [OATS, , , GEMS] = sampleCurrencies;
+const [OATS, PEBBLES, , GEMS] = sampleCurrencies;
+const [OAT_BOT, , , TICKET_BOT] = sampleBots;
 const NOW = new Date("2026-11-13T00:00:00Z");
 const TRADER_ID = "530917284650193847";
 const REASON = "Laundered coins through alts.";
@@ -38,7 +39,7 @@ async function adminPreview(reverse: ReverseRequest): Promise<string[]> {
 
 async function ownerPreview(reverse: ReverseRequest): Promise<string[]> {
   const preview = createMockApi()
-    .currencyBlocks(OATS.id)
+    .botBlocks(TICKET_BOT.id)
     .previewBlock(TRADER_ID, REASON, reverse);
 
   return (await settle(preview)).map((transaction) => transaction.id);
@@ -90,20 +91,36 @@ describe("admin reversal windows", () => {
 });
 
 describe("owner reversal directions", () => {
-  test("incoming counts trades into the owner's currency", async () => {
+  test("incoming counts trades into the bot's currencies", async () => {
     expect(
       await ownerPreview({ window: "all", direction: "incoming" }),
-    ).toEqual([PEBBLES_INTO_OATS, TICKETS_INTO_OATS_IN_SEPTEMBER]);
+    ).toEqual([SCRAP_INTO_TICKETS]);
   });
 
-  test("outgoing counts trades out of the owner's currency", async () => {
+  test("outgoing counts trades out of the bot's currencies", async () => {
     expect(
       await ownerPreview({ window: "all", direction: "outgoing" }),
-    ).toEqual([OATS_INTO_GEMS]);
+    ).toEqual([TICKETS_INTO_OATS_IN_SEPTEMBER]);
   });
 
-  test("both leaves out trades that never touch the owner's currency", async () => {
+  test("both leaves out trades that never touch the bot's currencies", async () => {
     expect(await ownerPreview({ window: "all", direction: "both" })).toEqual([
+      SCRAP_INTO_TICKETS,
+      TICKETS_INTO_OATS_IN_SEPTEMBER,
+    ]);
+  });
+
+  test("incoming counts trades into any of the bot's currencies", async () => {
+    const api = createMockApi();
+    await settle(api.updateCurrency(GEMS.id, { botId: OAT_BOT.id }));
+    const preview = await settle(
+      api.botBlocks(OAT_BOT.id).previewBlock(TRADER_ID, REASON, {
+        window: "all",
+        direction: "incoming",
+      }),
+    );
+
+    expect(preview.map((transaction) => transaction.id)).toEqual([
       PEBBLES_INTO_OATS,
       OATS_INTO_GEMS,
       TICKETS_INTO_OATS_IN_SEPTEMBER,
@@ -113,7 +130,7 @@ describe("owner reversal directions", () => {
   test("an owner block needs a direction", async () => {
     const error = await apiErrorOf(
       createMockApi()
-        .currencyBlocks(OATS.id)
+        .botBlocks(OAT_BOT.id)
         .previewBlock(TRADER_ID, REASON, { window: "all" }),
     );
 
@@ -126,31 +143,31 @@ describe("blocking with a reversal", () => {
   test("marks each trade Reversed and runs it back through the curve", async () => {
     const api = createMockApi();
     const [trade] = (await settle(api.listRecentTransactions())).filter(
-      (transaction) => transaction.id === OATS_INTO_GEMS,
+      (transaction) => transaction.id === PEBBLES_INTO_OATS,
     );
     const expected = reservesAfterUndo(trade.payout, {
-      from: await reserveOf(api, OATS.id),
-      to: await reserveOf(api, GEMS.id),
+      from: await reserveOf(api, PEBBLES.id),
+      to: await reserveOf(api, OATS.id),
     });
 
     const { reversed } = await settle(
       api
-        .currencyBlocks(OATS.id)
-        .block(TRADER_ID, REASON, { window: "24h", direction: "outgoing" }),
+        .botBlocks(OAT_BOT.id)
+        .block(TRADER_ID, REASON, { window: "24h", direction: "incoming" }),
     );
 
     expect(reversed.map((transaction) => transaction.status)).toEqual([
       "Reversed",
     ]);
-    expect(await reserveOf(api, OATS.id)).toBe(expected.from);
-    expect(await reserveOf(api, GEMS.id)).toBe(expected.to);
+    expect(await reserveOf(api, PEBBLES.id)).toBe(expected.from);
+    expect(await reserveOf(api, OATS.id)).toBe(expected.to);
   });
 
   test("a refused block reverses nothing", async () => {
     const api = createMockApi();
     const before = await settle(api.listRecentTransactions());
     const error = await apiErrorOf(
-      api.currencyBlocks(OATS.id).block(TRADER_ID, " ", {
+      api.botBlocks(OAT_BOT.id).block(TRADER_ID, " ", {
         window: "all",
         direction: "both",
       }),
@@ -158,7 +175,7 @@ describe("blocking with a reversal", () => {
 
     expect(error.field).toBe("reason");
     expect(await settle(api.listRecentTransactions())).toEqual(before);
-    expect(await settle(api.currencyBlocks(OATS.id).list())).not.toContainEqual(
+    expect(await settle(api.botBlocks(OAT_BOT.id).list())).not.toContainEqual(
       expect.objectContaining({ userId: TRADER_ID }),
     );
   });

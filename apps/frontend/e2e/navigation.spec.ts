@@ -12,7 +12,9 @@ test("the dashboard is the home page", async ({ page }) => {
 
 test("the logo wordmark is a home link named Discoin", async ({ page }) => {
   await page.goto("/currency/OAT");
-  const home = page.getByRole("link", { name: "Discoin", exact: true });
+  const home = page
+    .locator(".site-header__bar")
+    .getByRole("link", { name: "Discoin", exact: true });
 
   await expect(home).toHaveAttribute("href", "/");
   await home.click();

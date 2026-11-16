@@ -38,7 +38,8 @@ def connection(database_url: str) -> Iterator[psycopg.Connection[DictRow]]:
 @pytest.fixture
 def api_environment(monkeypatch: pytest.MonkeyPatch, database_url: str) -> None:
     monkeypatch.setenv("DATABASE_URL", database_url)
-    monkeypatch.setenv("FIRST_ADMIN_ID", FIRST_ADMIN_ID)
+    monkeypatch.setenv("FIRST_ADMIN_IDS", FIRST_ADMIN_ID)
+    monkeypatch.delenv("FIRST_ADMIN_ID", raising=False)
     monkeypatch.setenv("DISCORD_CLIENT_ID", "discord-client")
     monkeypatch.setenv("DISCORD_CLIENT_SECRET", "discord-secret")
     monkeypatch.setenv("DISCORD_REDIRECT_URI", "https://api.example.com/auth/discord/callback")

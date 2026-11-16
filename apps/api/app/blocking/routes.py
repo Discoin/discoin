@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.auth.sessions import AdminUser, LoggedInUser
+from app.auth.sessions import AdminUser
 from app.blocking.service import (
     GLOBAL,
     BlockedUser,
@@ -8,42 +8,36 @@ from app.blocking.service import (
     BlockResult,
     PreviewRequest,
     block_user,
-    currency_scope,
     list_blocks,
+    owner_scope,
     preview_block,
     unblock_user,
 )
 from app.core.database import Database, Now
-from app.owners.access import OwnedCurrencyId
+from app.owners.access import OwnedBot, OwnedBotForWrite
 from app.transactions.models import Transaction
 
 router = APIRouter(tags=["blocking"])
 
 
-@router.get("/currencies/{currency_id}/blocks")
-def get_currency_blocks(currency_id: OwnedCurrencyId, db: Database) -> list[BlockedUser]:
-    return list_blocks(db, currency_scope(currency_id))
+@router.get("/bots/{bot_id}/blocks")
+def get_bot_blocks(owned: OwnedBot, db: Database) -> list[BlockedUser]:
+    return list_blocks(db, owner_scope(owned))
 
 
-@router.post("/currencies/{currency_id}/blocks/preview")
-def preview_currency_block(
-    currency_id: OwnedCurrencyId, body: PreviewRequest, db: Database, now: Now
-) -> list[Transaction]:
-    return preview_block(db, currency_scope(currency_id), body, now)
+@router.post("/bots/{bot_id}/blocks/preview")
+def preview_bot_block(owned: OwnedBot, body: PreviewRequest, db: Database, now: Now) -> list[Transaction]:
+    return preview_block(db, owner_scope(owned), body, now)
 
 
-@router.post("/currencies/{currency_id}/blocks", status_code=201)
-def block_for_currency(
-    currency_id: OwnedCurrencyId, body: BlockRequest, user: LoggedInUser, db: Database, now: Now
-) -> BlockResult:
-    return block_user(db, currency_scope(currency_id), body, user.id, now)
+@router.post("/bots/{bot_id}/blocks", status_code=201)
+def block_for_bot(owned: OwnedBotForWrite, body: BlockRequest, db: Database, now: Now) -> BlockResult:
+    return block_user(db, owner_scope(owned), body, owned.owner_id, now)
 
 
-@router.delete("/currencies/{currency_id}/blocks/{user_id}", status_code=204)
-def unblock_for_currency(
-    currency_id: OwnedCurrencyId, user_id: str, user: LoggedInUser, db: Database, now: Now
-) -> None:
-    unblock_user(db, currency_scope(currency_id), user_id, user.id, now)
+@router.delete("/bots/{bot_id}/blocks/{user_id}", status_code=204)
+def unblock_for_bot(owned: OwnedBotForWrite, user_id: str, db: Database, now: Now) -> None:
+    unblock_user(db, owner_scope(owned), user_id, owned.owner_id, now)
 
 
 @router.get("/admin/blocks")

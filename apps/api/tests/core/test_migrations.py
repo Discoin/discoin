@@ -1,9 +1,12 @@
+import shutil
+from decimal import Decimal
 from pathlib import Path
+from uuid import UUID
 
 import psycopg
 import pytest
 
-from app.core.migrations import MigrationError, apply_migrations
+from app.core.migrations import MIGRATIONS_DIRECTORY, MigrationError, apply_migrations
 
 
 def write_migration(directory: Path, file_name: str, statements: str) -> None:
@@ -103,6 +106,181 @@ def test_applied_file_renamed_raises(connection: psycopg.Connection, tmp_path: P
 
     with pytest.raises(MigrationError, match="was renamed"):
         apply_migrations(connection, tmp_path)
+
+
+def test_multiplier_migration_gives_existing_currencies_4_and_keeps_their_reserve(
+    connection: psycopg.Connection, tmp_path: Path
+) -> None:
+    for file_name in ("0001_initial_schema.sql", "0002_user_avatar.sql"):
+        shutil.copy(MIGRATIONS_DIRECTORY / file_name, tmp_path / file_name)
+
+    apply_migrations(connection, tmp_path)
+    connection.execute(
+        """
+        INSERT INTO currencies (id, name, abbreviation, owner_id, reserve, weekly_median)
+        VALUES ('019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21', 'Oats', 'OAT', '200000000000000002', 123456.78, 50000)
+        """
+    )
+
+    apply_migrations(connection, MIGRATIONS_DIRECTORY)
+
+    stored = connection.execute("SELECT reserve, multiplier FROM currencies").fetchone()
+    assert stored == {"reserve": Decimal("123456.78"), "multiplier": 4}
+
+
+def test_multiplier_is_required_with_no_default(connection: psycopg.Connection) -> None:
+    apply_migrations(connection, MIGRATIONS_DIRECTORY)
+
+    with pytest.raises(psycopg.errors.NotNullViolation):
+        connection.execute(
+            """
+            INSERT INTO currencies (id, name, abbreviation, reserve, weekly_median)
+            VALUES ('019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21', 'Oats', 'OAT', 100000, 25000)
+            """
+        )
+
+
+OATS = "019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"
+GEMS = "019a6f11-7d56-7a11-b3e5-0c98a4d72f6b"
+PENDING_ID = "019a7c3e-5b21-7a4f-9c3d-2e81f0a9b6d4"
+BLOCKED_USER = "300000000000000003"
+
+
+@pytest.fixture
+def at_multiplier_release(connection: psycopg.Connection, tmp_path: Path) -> psycopg.Connection:
+    for file_name in ("0001_initial_schema.sql", "0002_user_avatar.sql", "0003_currency_multiplier.sql"):
+        shutil.copy(MIGRATIONS_DIRECTORY / file_name, tmp_path / file_name)
+
+    apply_migrations(connection, tmp_path)
+    connection.execute(
+        """
+        INSERT INTO currencies
+            (id, name, abbreviation, owner_id, reserve, weekly_median, multiplier,
+             webhook_url, webhook_secret_sealed, api_token_hash)
+        VALUES
+            (%(oats)s, 'Oats', 'OAT', '200000000000000002', 100000, 25000, 4,
+             'https://oats.example.com', 'v1.sealed', 'token-hash'),
+            (%(gems)s, 'Gems', 'GEM', '200000000000000009', 100000, 25000, 4, NULL, NULL, NULL)
+        """,
+        {"oats": OATS, "gems": GEMS},
+    )
+    connection.execute(
+        """
+        INSERT INTO blocks (user_id, currency_id, reason, blocked_by, blocked_at)
+        VALUES (%s, %s, 'Spam', '200000000000000002', now())
+        """,
+        (BLOCKED_USER, OATS),
+    )
+    connection.execute(
+        """
+        INSERT INTO transactions (id, user_id, from_currency_id, to_currency_id, amount, payout, status, submitted_at)
+        VALUES (%s, %s, %s, %s, 100, 10, 'Pending', now())
+        """,
+        (PENDING_ID, BLOCKED_USER, GEMS, OATS),
+    )
+    connection.execute(
+        """
+        INSERT INTO webhook_deliveries (transaction_id, currency_id, event, payload, next_attempt_at)
+        VALUES (%s, %s, 'created', '{}', now())
+        """,
+        (PENDING_ID, OATS),
+    )
+    apply_migrations(connection, MIGRATIONS_DIRECTORY)
+
+    return connection
+
+
+def column_names(connection: psycopg.Connection, table: str) -> set[str]:
+    rows = connection.execute(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = %s",
+        (table,),
+    ).fetchall()
+
+    return {row["column_name"] for row in rows}
+
+
+def test_bots_migration_leaves_every_currency_botless_and_live(at_multiplier_release: psycopg.Connection) -> None:
+    rows = at_multiplier_release.execute(
+        "SELECT abbreviation, bot_id, removed_at FROM currencies ORDER BY 1"
+    ).fetchall()
+
+    assert rows == [
+        {"abbreviation": "GEM", "bot_id": None, "removed_at": None},
+        {"abbreviation": "OAT", "bot_id": None, "removed_at": None},
+    ]
+    assert at_multiplier_release.execute("SELECT count(*) AS bots FROM bots").fetchone()["bots"] == 0
+
+
+def test_bots_migration_drops_owner_token_and_webhook_columns(at_multiplier_release: psycopg.Connection) -> None:
+    dropped = {"owner_id", "webhook_url", "webhook_secret_sealed", "api_token_hash"}
+
+    assert column_names(at_multiplier_release, "currencies") & dropped == set()
+
+
+def test_bots_migration_keeps_pending_transactions_and_blocks(at_multiplier_release: psycopg.Connection) -> None:
+    transaction = at_multiplier_release.execute("SELECT status FROM transactions").fetchone()
+    block = at_multiplier_release.execute("SELECT currency_id, bot_id, unblocked_at FROM blocks").fetchone()
+
+    assert transaction == {"status": "Pending"}
+    assert block == {"currency_id": UUID(OATS), "bot_id": None, "unblocked_at": None}
+
+
+def test_bots_migration_drops_deliveries_that_lost_their_webhook(at_multiplier_release: psycopg.Connection) -> None:
+    delivery = at_multiplier_release.execute("SELECT state, last_error FROM webhook_deliveries").fetchone()
+
+    assert delivery["state"] == "dropped"
+    assert delivery["last_error"].startswith("The currency webhook was removed")
+
+
+def test_abbreviation_is_unique_among_live_currencies_only(at_multiplier_release: psycopg.Connection) -> None:
+    at_multiplier_release.execute("UPDATE currencies SET active = false, removed_at = now() WHERE id = %s", (OATS,))
+    insert_oats = """
+        INSERT INTO currencies (id, name, abbreviation, reserve, weekly_median, multiplier)
+        VALUES (%s, 'New oats', 'OAT', 100000, 25000, 4)
+    """
+    second = "019a8000-0000-7000-8000-000000000001"
+    third = "019a8000-0000-7000-8000-000000000002"
+    at_multiplier_release.execute(insert_oats, (second,))
+    at_multiplier_release.execute("UPDATE currencies SET active = false, removed_at = now() WHERE id = %s", (second,))
+    at_multiplier_release.execute(insert_oats, (third,))
+
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        at_multiplier_release.execute(insert_oats, ("019a8000-0000-7000-8000-000000000003",))
+
+    removed = at_multiplier_release.execute(
+        "SELECT count(*) AS removed FROM currencies WHERE abbreviation = 'OAT' AND removed_at IS NOT NULL"
+    ).fetchone()
+    assert removed["removed"] == 2
+
+
+def test_bot_discord_id_is_unique_among_live_bots_only(at_multiplier_release: psycopg.Connection) -> None:
+    insert_bot = "INSERT INTO bots (id, name, discord_id, owner_id) VALUES (%s, 'Oat bot', '400000000000000004', %s)"
+    first = "019a8000-0000-7000-8000-000000000011"
+    second = "019a8000-0000-7000-8000-000000000012"
+    at_multiplier_release.execute(insert_bot, (first, BLOCKED_USER))
+    at_multiplier_release.execute("UPDATE bots SET removed_at = now() WHERE id = %s", (first,))
+    at_multiplier_release.execute(insert_bot, (second, BLOCKED_USER))
+    at_multiplier_release.execute("UPDATE bots SET removed_at = now() WHERE id = %s", (second,))
+    at_multiplier_release.execute(insert_bot, ("019a8000-0000-7000-8000-000000000013", BLOCKED_USER))
+
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        at_multiplier_release.execute(insert_bot, ("019a8000-0000-7000-8000-000000000014", BLOCKED_USER))
+
+
+def test_removed_bot_cannot_keep_a_token(at_multiplier_release: psycopg.Connection) -> None:
+    with pytest.raises(psycopg.errors.CheckViolation):
+        at_multiplier_release.execute(
+            """
+            INSERT INTO bots (id, name, discord_id, owner_id, api_token_hash, removed_at)
+            VALUES ('019a8000-0000-7000-8000-000000000021', 'Gone', '400000000000000004', %s, 'hash', now())
+            """,
+            (BLOCKED_USER,),
+        )
+
+
+def test_removed_currency_must_be_inactive(at_multiplier_release: psycopg.Connection) -> None:
+    with pytest.raises(psycopg.errors.CheckViolation):
+        at_multiplier_release.execute("UPDATE currencies SET removed_at = now() WHERE id = %s", (OATS,))
 
 
 def test_needs_autocommit_connection(database_url: str, tmp_path: Path) -> None:

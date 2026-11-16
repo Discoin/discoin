@@ -7,6 +7,7 @@ import {
   prerender as ssr,
 } from "preact-iso";
 
+import { Footer } from "./components/layout/Footer.jsx";
 import { Header } from "./components/layout/Header.jsx";
 import { SessionProvider } from "./components/session/SessionProvider.jsx";
 import { Toaster } from "./components/shared/Toaster.jsx";
@@ -16,6 +17,7 @@ import { CurrencyPage } from "./pages/Currency/index.jsx";
 import { Dashboard } from "./pages/Dashboard/index.jsx";
 import { MyTransactions } from "./pages/MyTransactions/index.jsx";
 import { NotFound } from "./pages/_404.jsx";
+import { Privacy } from "./pages/Privacy/index.jsx";
 import "@fontsource-variable/instrument-sans/standard.css";
 import "@fontsource-variable/martian-mono/standard.css";
 import "./style.scss";
@@ -37,9 +39,11 @@ export function App() {
             <Route path="/transactions" component={MyTransactions} />
             <Route path="/owner" component={BotOwner} />
             <Route path="/admin" component={Admin} />
+            <Route path="/privacy" component={Privacy} />
             <Route default component={NotFound} />
           </Router>
         </main>
+        <Footer />
         <Toaster />
       </SessionProvider>
     </LocationProvider>

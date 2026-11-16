@@ -26,6 +26,19 @@ test("a currency page loads its quote, chart and trades from the API", async ({
   await expect(page.getByText("No trades yet")).toBeVisible();
 });
 
+test("Resources opens the API docs, which list the bot endpoints", async ({
+  page,
+}) => {
+  await openPage(page, "/");
+  await page.getByRole("button", { name: "Resources" }).click();
+  await page.getByRole("link", { name: "API Docs" }).click();
+
+  await expect(page).toHaveTitle("Discoin API - Swagger UI");
+  expect(new URL(page.url()).pathname).toBe("/api/docs");
+  await expect(page.getByText("/currencies", { exact: true })).toBeVisible();
+  await expect(page.locator(".opblock").first()).toBeVisible();
+});
+
 test("logged out visitors are offered Discord login on gated pages", async ({
   page,
 }) => {

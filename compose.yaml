@@ -21,7 +21,7 @@ services:
       context: ./apps/api
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-discoin}:${POSTGRES_PASSWORD:-discoin}@db:5432/${POSTGRES_DB:-discoin}
-      FIRST_ADMIN_ID: ${FIRST_ADMIN_ID:?Set FIRST_ADMIN_ID in .env to the Discord user ID of the first admin}
+      FIRST_ADMIN_IDS: ${FIRST_ADMIN_IDS:?Set FIRST_ADMIN_IDS in .env to the Discord user IDs of the first admins, comma separated}
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?Set DISCORD_CLIENT_ID in .env from the Discord developer portal}
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:?Set DISCORD_CLIENT_SECRET in .env from the Discord developer portal}
       DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI:?Set DISCORD_REDIRECT_URI in .env to the API login callback URL}

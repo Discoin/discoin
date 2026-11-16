@@ -95,7 +95,7 @@ jobs:
     name: Docker Compose integration and real API smoke test
     runs-on: ubuntu-latest
     env:
-      FIRST_ADMIN_ID: "100000000000000001"
+      FIRST_ADMIN_IDS: "100000000000000001"
       DISCORD_CLIENT_ID: ci-client
       DISCORD_CLIENT_SECRET: ci-secret
       DISCORD_REDIRECT_URI: http://localhost:4080/api/auth/discord/callback

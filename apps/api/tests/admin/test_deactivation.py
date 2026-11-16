@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 
 import app.admin.deactivation
 from app.transactions.ledger import create_transaction
-from tests.factories import FIRST_ADMIN_ID, NOW, OWNER_ID, USER_ID, create_currency, log_in
+from tests.factories import FIRST_ADMIN_ID, NOW, OWNER_ID, USER_ID, bot_of, create_currency, log_in
+from tests.webhooks.receiver import connect_webhook
 
 
 @pytest.fixture
@@ -52,7 +53,7 @@ def test_deactivation_cancels_pending_both_ways(
     response = set_active(client, oats, False)
 
     assert response.status_code == 200
-    assert response.json()["currency"]["active"] is False
+    assert response.json()["saved"]["currency"]["active"] is False
     assert (status_of(connection, into), status_of(connection, out_of)) == ("Cancelled", "Cancelled")
     assert status_of(connection, elsewhere) == "Pending"
 
@@ -61,9 +62,8 @@ def test_deactivation_sends_cancelled_webhooks(
     client: TestClient, connection: psycopg.Connection, trio: tuple[UUID, UUID, UUID]
 ) -> None:
     oats, gems, _ = trio
-    connection.execute(
-        "UPDATE currencies SET webhook_url = 'https://bot.example.com', webhook_secret_sealed = 'v1.unused'"
-    )
+    connect_webhook(connection, oats)
+    connect_webhook(connection, gems)
     convert(connection, oats, gems, 1)
     connection.execute("DELETE FROM webhook_deliveries")
 
@@ -97,7 +97,7 @@ def test_reactivation_does_not_restore_cancelled_transactions(
 
     response = set_active(client, oats, True)
 
-    assert response.json()["currency"]["active"] is True
+    assert response.json()["saved"]["currency"]["active"] is True
     assert status_of(connection, cancelled) == "Cancelled"
     assert [currency["abbreviation"] for currency in client.get("/currencies").json()] == ["GEM", "OAT", "PBL"]
 
@@ -145,7 +145,7 @@ def test_refunds_still_work_on_an_inactive_currency(
         (USER_ID, gems, pebbles, NOW),
     )
     log_in(client, connection, OWNER_ID)
-    token = client.post(f"/currencies/{pebbles}/api-token").json()["token"]
+    token = client.post(f"/bots/{bot_of(connection, pebbles)}/api-token").json()["token"]
 
     response = client.patch(
         "/transactions/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21",

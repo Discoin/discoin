@@ -29,3 +29,28 @@ test("a failed request shows its error and loads again on retry", async () => {
   expect(await screen.findByText("OAT 0.1000")).toBeTruthy();
   expect(load).toHaveBeenCalledTimes(2);
 });
+
+function Tags() {
+  const request = useRequest(() => Promise.resolve(["OAT"]), []);
+  const addTwoTags = () => {
+    request.change((tags) => [...tags, "PBL"]);
+    request.change((tags) => [...tags, "SCR"]);
+  };
+
+  return (
+    <Loadable state={request.state} label="tags" onRetry={request.reload}>
+      {(tags) => (
+        <button type="button" onClick={addTwoTags}>
+          {tags.join(", ")}
+        </button>
+      )}
+    </Loadable>
+  );
+}
+
+test("each change starts from the data the one before left", async () => {
+  render(<Tags />);
+  fireEvent.click(await screen.findByRole("button", { name: "OAT" }));
+
+  expect(screen.getByRole("button").textContent).toBe("OAT, PBL, SCR");
+});

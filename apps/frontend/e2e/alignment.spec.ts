@@ -1,25 +1,25 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { openOwnerReversalReview, openPage } from "./support.js";
+import { openNavDrawer, openOwnerReversalReview, openPage } from "./support.js";
 
 const SHARED_LINES = [
   ".ticker__item",
   ".data-table tbody tr",
   ".secret-field__row",
+  ".site-header__bar",
+];
+const DRAWER_LINES = [
+  ".nav-drawer__head",
+  ".nav-drawer__account",
+  ".nav-drawer__nav",
 ];
 const DESKTOP_WIDTH = 1280;
 const PHONE_WIDTH = 360;
-const HEADER_LINE: Record<number, string> = {
-  [DESKTOP_WIDTH]: ".site-header__bar",
-  [PHONE_WIDTH]: ".site-header__nav",
-};
 const GLYPHS = ".price-change__glyph";
 const TOLERANCE_PX = 1;
 const LINE_GAP_PX = 10;
 
-function baselineSpreads(page: Page, width: number) {
-  const lines = [...SHARED_LINES, HEADER_LINE[width]];
-
+function baselineSpreads(page: Page, lines: string[]) {
   return page.evaluate(
     ({ lines, glyphs, lineGap }) => {
       const spreads: { line: string; spread: number }[] = [];
@@ -66,10 +66,10 @@ function baselineSpreads(page: Page, width: number) {
   );
 }
 
-async function expectSharedBaselines(page: Page, width: number) {
+async function expectSharedBaselines(page: Page, lines = SHARED_LINES) {
   await page.evaluate(() => document.fonts.ready);
 
-  for (const { line, spread } of await baselineSpreads(page, width)) {
+  for (const { line, spread } of await baselineSpreads(page, lines)) {
     expect(spread, line).toBeLessThanOrEqual(TOLERANCE_PX);
   }
 }
@@ -87,7 +87,7 @@ for (const width of [DESKTOP_WIDTH, PHONE_WIDTH]) {
     }) => {
       await page.setViewportSize({ width, height: 900 });
       await openPage(page, path);
-      await expectSharedBaselines(page, width);
+      await expectSharedBaselines(page);
     });
   }
 
@@ -97,6 +97,17 @@ for (const width of [DESKTOP_WIDTH, PHONE_WIDTH]) {
     await page.setViewportSize({ width, height: 900 });
     await openPage(page, "/owner");
     await openOwnerReversalReview(page);
-    await expectSharedBaselines(page, width);
+    await expectSharedBaselines(page);
   });
 }
+
+test(`text on one line shares a baseline in the open menu drawer at ${PHONE_WIDTH}px`, async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: PHONE_WIDTH, height: 900 });
+  await openPage(page, "/");
+  const drawer = await openNavDrawer(page);
+  await drawer.getByRole("button", { name: "Resources" }).click();
+
+  await expectSharedBaselines(page, DRAWER_LINES);
+});

@@ -12,7 +12,7 @@ const USER: CurrentUser = {
   avatarUrl: "https://cdn.discordapp.com/avatars/115269304705875969/abc.png",
   defaultAvatarUrl: "https://cdn.discordapp.com/embed/avatars/1.png",
   isAdmin: false,
-  ownedCurrencyIds: [],
+  ownedBots: [],
 };
 
 vi.mock("../../api/client.js", () => ({

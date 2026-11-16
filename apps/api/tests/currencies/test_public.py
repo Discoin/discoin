@@ -138,12 +138,15 @@ def test_recent_feed_is_newest_first_without_user_ids(client: TestClient, connec
         "id",
         "fromCurrencyId",
         "toCurrencyId",
+        "fromCurrency",
+        "toCurrency",
         "amount",
         "payout",
         "status",
         "submittedAt",
         "handledAt",
     }
+    assert feed[0]["fromCurrency"] == {"abbreviation": "GEM", "name": "GEM coin", "removed": False}
     assert USER_ID not in str(feed)
 
 

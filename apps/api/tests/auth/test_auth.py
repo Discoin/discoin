@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from datetime import timedelta
 from urllib.parse import parse_qs, urlsplit
+from uuid import UUID
 
 import httpx
 import psycopg
@@ -16,6 +17,9 @@ from tests.factories import (
     NOW,
     OWNER_ID,
     USER_ID,
+    bot_of,
+    create_bot,
+    create_botless_currency,
     create_currency,
     create_transaction,
     log_in,
@@ -78,7 +82,7 @@ def test_callback_logs_the_user_in(client: TestClient, connection: psycopg.Conne
         "avatarUrl": f"https://cdn.discordapp.com/avatars/{USER_ID}/abc123.png?size=64",
         "defaultAvatarUrl": f"https://cdn.discordapp.com/embed/avatars/{(int(USER_ID) >> 22) % 6}.png",
         "isAdmin": False,
-        "ownedCurrencyIds": [],
+        "ownedBots": [],
     }
 
 
@@ -130,11 +134,48 @@ def test_me_rejects_an_expired_session(client: TestClient, connection: psycopg.C
     assert client.get("/me").status_code == 401
 
 
-def test_me_lists_owned_currencies_and_admin_flag(client: TestClient, connection: psycopg.Connection) -> None:
+def test_me_lists_owned_bots_with_their_currencies(client: TestClient, connection: psycopg.Connection) -> None:
     owned = create_currency(connection, "OAT", 100_000)
+    bot_id = bot_of(connection, owned)
     log_in(client, connection, OWNER_ID)
 
-    assert client.get("/me").json()["ownedCurrencyIds"] == [str(owned)]
+    assert client.get("/me").json()["ownedBots"] == [
+        {"id": str(bot_id), "name": bot_name(connection, bot_id), "currencyIds": [str(owned)]}
+    ]
+
+
+def test_me_lists_a_bot_without_currencies(client: TestClient, connection: psycopg.Connection) -> None:
+    bot_id = create_bot(connection)
+    log_in(client, connection, OWNER_ID)
+
+    assert client.get("/me").json()["ownedBots"] == [
+        {"id": str(bot_id), "name": bot_name(connection, bot_id), "currencyIds": []}
+    ]
+
+
+def test_me_leaves_out_removed_bots_and_currencies(client: TestClient, connection: psycopg.Connection) -> None:
+    kept = create_currency(connection, "OAT", 100_000)
+    removed = create_botless_currency(connection, "GEM", 100_000)
+    connection.execute("UPDATE currencies SET bot_id = %s WHERE id = %s", (bot_of(connection, kept), removed))
+    gone_bot = create_bot(connection)
+    connection.execute("UPDATE currencies SET active = false, removed_at = %s WHERE id = %s", (NOW, removed))
+    connection.execute("UPDATE bots SET removed_at = %s WHERE id = %s", (NOW, gone_bot))
+    log_in(client, connection, OWNER_ID)
+
+    bots = client.get("/me").json()["ownedBots"]
+
+    assert [(bot["id"], bot["currencyIds"]) for bot in bots] == [(str(bot_of(connection, kept)), [str(kept)])]
+
+
+def test_me_ignores_botless_currencies(client: TestClient, connection: psycopg.Connection) -> None:
+    create_botless_currency(connection, "OAT", 100_000)
+    log_in(client, connection, OWNER_ID)
+
+    assert client.get("/me").json()["ownedBots"] == []
+
+
+def bot_name(connection: psycopg.Connection, bot_id: UUID) -> str:
+    return connection.execute("SELECT name FROM bots WHERE id = %s", (bot_id,)).fetchone()["name"]
 
 
 def test_seeded_admin_is_admin_after_login(client: TestClient, connection: psycopg.Connection) -> None:

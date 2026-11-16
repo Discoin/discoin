@@ -10,6 +10,13 @@ export class ApiError extends Error {
   }
 }
 
+export class ConnectionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConnectionError";
+  }
+}
+
 export class DailyCapError extends ApiError {
   readonly maxAmount: number;
 

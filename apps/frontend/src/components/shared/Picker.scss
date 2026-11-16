@@ -1,0 +1,134 @@
+.picker {
+  position: relative;
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.picker__label {
+  justify-self: start;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.picker__trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 2.75rem;
+  padding-inline: var(--space-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background-color: var(--surface-sunken);
+  color: var(--ink);
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--ink-muted);
+  }
+
+  &:focus-visible {
+    border-color: var(--accent);
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    box-shadow: var(--focus-ring);
+  }
+
+  &[aria-expanded="true"] {
+    border-color: var(--accent);
+  }
+
+  &[aria-disabled="true"] {
+    border-style: dashed;
+    color: var(--ink-muted);
+    cursor: progress;
+  }
+}
+
+.picker__value {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  padding-block: var(--space-1);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.picker__chevron {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+[aria-expanded="true"] > .picker__chevron {
+  transform: rotate(180deg);
+}
+
+.picker__list {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  inset-inline: 0;
+  z-index: 10;
+  display: grid;
+  gap: 2px;
+  max-height: min(20rem, 60vh);
+  margin: 0;
+  padding: var(--space-1);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background-color: var(--surface-raised);
+  list-style: none;
+}
+
+.picker__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-tag);
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--surface-sunken);
+  }
+
+  &[aria-selected="true"] {
+    font-weight: 600;
+  }
+}
+
+.picker__option--active,
+.picker__option--active:hover {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background-color: var(--accent-soft);
+}
+
+.picker__check {
+  flex: none;
+  visibility: hidden;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+[aria-selected="true"] > .picker__check {
+  visibility: visible;
+}
+
+.picker__option-content {
+  display: flex;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

@@ -15,7 +15,7 @@ from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
 from app.core.secret_box import SecretBox
-from app.transactions.models import BotTransaction
+from app.transactions.models import WebhookTransaction
 
 SECRET_PREFIX = "whsec_"
 SIGNATURE_HEADER = "Discoin-Signature"
@@ -35,13 +35,13 @@ EVENTS = {
 @dataclass(frozen=True)
 class Trigger:
     kind: str
-    currency_id: UUID | None = None
+    bot_id: UUID | None = None
 
     def as_json(self) -> dict[str, str]:
-        if self.currency_id is None:
+        if self.bot_id is None:
             return {"kind": self.kind}
 
-        return {"kind": self.kind, "currencyId": str(self.currency_id)}
+        return {"kind": self.kind, "botId": str(self.bot_id)}
 
 
 ADMINS = Trigger("admins")
@@ -63,16 +63,13 @@ class Outcome:
         return self.error is None
 
 
-def owner_of(currency_id: UUID) -> Trigger:
-    return Trigger("owner", currency_id)
+def owner_of(bot_id: UUID) -> Trigger:
+    return Trigger("owner", bot_id)
 
 
-def issue_webhook_secret(db: Connection[DictRow], box: SecretBox, currency_id: UUID) -> str:
+def issue_webhook_secret(db: Connection[DictRow], box: SecretBox, bot_id: UUID) -> str:
     secret = SECRET_PREFIX + secrets.token_urlsafe(32)
-    db.execute(
-        "UPDATE currencies SET webhook_secret_sealed = %s WHERE id = %s",
-        (box.seal(secret, str(currency_id)), currency_id),
-    )
+    db.execute("UPDATE bots SET webhook_secret_sealed = %s WHERE id = %s", (box.seal(secret, str(bot_id)), bot_id))
 
     return secret
 
@@ -86,7 +83,7 @@ def enqueue_webhook(
 ) -> None:
     payload: dict[str, Any] = {
         "event": EVENTS[event],
-        "transaction": BotTransaction.model_validate(transaction).model_dump(mode="json"),
+        "transaction": WebhookTransaction.model_validate(transaction).model_dump(mode="json"),
     }
     if trigger is not None:
         payload["triggeredBy"] = trigger.as_json()
@@ -94,8 +91,9 @@ def enqueue_webhook(
     db.execute(
         """
         INSERT INTO webhook_deliveries (transaction_id, currency_id, event, payload, next_attempt_at)
-        SELECT %(transaction_id)s, id, %(event)s, %(payload)s, %(now)s FROM currencies
-        WHERE id = %(currency_id)s AND webhook_url IS NOT NULL
+        SELECT %(transaction_id)s, c.id, %(event)s, %(payload)s, %(now)s
+        FROM currencies c JOIN bots b ON b.id = c.bot_id
+        WHERE c.id = %(currency_id)s AND c.removed_at IS NULL AND b.webhook_url IS NOT NULL
         """,
         {
             "transaction_id": transaction["id"],
@@ -107,12 +105,12 @@ def enqueue_webhook(
     )
 
 
-def build_test_delivery(currency: dict[str, Any], user_id: str, now: datetime) -> dict[str, Any]:
-    transaction = BotTransaction(
+def build_test_delivery(webhook: dict[str, Any], user_id: str, now: datetime) -> dict[str, Any]:
+    transaction = WebhookTransaction(
         id=uuid7(),
         user_id=user_id,
         from_currency_id=NO_CURRENCY,
-        to_currency_id=currency["id"],
+        to_currency_id=NO_CURRENCY,
         amount=TEST_AMOUNT,
         payout=TEST_PAYOUT,
         status="Pending",
@@ -122,11 +120,21 @@ def build_test_delivery(currency: dict[str, Any], user_id: str, now: datetime) -
 
     return {
         "id": TEST_DELIVERY_ID,
-        "currency_id": currency["id"],
-        "webhook_url": currency["webhook_url"],
-        "webhook_secret_sealed": currency["webhook_secret_sealed"],
+        "bot_id": webhook["bot_id"],
+        "webhook_url": webhook["webhook_url"],
+        "webhook_secret_sealed": webhook["webhook_secret_sealed"],
         "payload": {"event": TEST_EVENT, "transaction": transaction.model_dump(mode="json")},
     }
+
+
+def drop_pending_deliveries(db: Connection[DictRow], bot_id: UUID, reason: str) -> None:
+    db.execute(
+        """
+        UPDATE webhook_deliveries SET state = 'dropped', last_error = %s
+        WHERE state = 'pending' AND currency_id IN (SELECT id FROM currencies WHERE bot_id = %s)
+        """,
+        (reason, bot_id),
+    )
 
 
 def retry_delay(failed_attempts: int) -> timedelta:
@@ -150,7 +158,7 @@ class WebhookSender:
             return Outcome(status=None, error="The webhook URL was removed.")
 
         try:
-            secret = self.box.open(delivery["webhook_secret_sealed"], str(delivery["currency_id"]))
+            secret = self.box.open(delivery["webhook_secret_sealed"], str(delivery["bot_id"]))
         except (InvalidTag, ValueError) as error:
             return Outcome(status=None, error=f"The webhook secret could not be read: {type(error).__name__}")
 
@@ -180,8 +188,10 @@ def deliver_next(db: Connection[DictRow], sender: WebhookSender, now: datetime) 
     with db.transaction():
         delivery = db.execute(
             """
-            SELECT d.id, d.currency_id, d.payload, d.attempt, c.webhook_url, c.webhook_secret_sealed
-            FROM webhook_deliveries d JOIN currencies c ON c.id = d.currency_id
+            SELECT d.id, d.payload, d.attempt, b.id AS bot_id, b.webhook_url, b.webhook_secret_sealed
+            FROM webhook_deliveries d
+            JOIN currencies c ON c.id = d.currency_id
+            JOIN bots b ON b.id = c.bot_id
             WHERE d.state = 'pending' AND d.next_attempt_at <= %s
             ORDER BY d.next_attempt_at, d.id
             LIMIT 1

@@ -24,7 +24,7 @@ interface LineChartProps {
   points: ChartPoint[];
   tone: ChartTone;
   format: (value: number) => string;
-  formatAxis: (value: number) => string;
+  formatAxis: (ticks: number[]) => string[];
 }
 
 interface Scales {
@@ -146,6 +146,7 @@ interface PlotProps {
 function Plot({ points, width, format, formatAxis, label }: PlotProps) {
   const [hovered, setHovered] = useState<number | undefined>(undefined);
   const scales = buildScales(points, width);
+  const axisLabels = formatAxis(scales.ticks);
   const line = points
     .map((point, index) => `${scales.x(index)},${scales.y(point.value)}`)
     .join(" ");
@@ -170,7 +171,7 @@ function Plot({ points, width, format, formatAxis, label }: PlotProps) {
         role="img"
         aria-label={label}
       >
-        {scales.ticks.map((tick) => (
+        {scales.ticks.map((tick, index) => (
           <g key={tick} class="line-chart__grid">
             <line
               x1={MARGIN.left}
@@ -184,7 +185,7 @@ function Plot({ points, width, format, formatAxis, label }: PlotProps) {
               text-anchor="end"
               dominant-baseline="middle"
             >
-              {formatAxis(tick)}
+              {axisLabels[index]}
             </text>
           </g>
         ))}

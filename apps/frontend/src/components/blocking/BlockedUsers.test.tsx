@@ -16,7 +16,7 @@ const OWN_BLOCK: BlockedUser = {
   userId: "293847561029384756",
   reason: "Farmed oats with an alt account.",
   blockedAt: "2026-11-02T14:22:10Z",
-  level: "currency",
+  level: "bot",
 };
 const GLOBAL_BAN: BlockedUser = {
   userId: "198273645019283746",
@@ -27,7 +27,7 @@ const GLOBAL_BAN: BlockedUser = {
 
 function ownerBlockList(): BlockListApi {
   return {
-    level: "currency",
+    level: "bot",
     list: () => Promise.resolve([OWN_BLOCK, GLOBAL_BAN]),
     block: vi.fn(),
     previewBlock: vi.fn(),
@@ -41,8 +41,10 @@ function rowOf(userId: string): Promise<HTMLElement> {
   return screen.findByRole("row", { name: new RegExp(userId) });
 }
 
+const SCOPE = "from Harvest bot";
+
 test("an owner's own block shows its reason", async () => {
-  render(<BlockedUsers blockList={ownerBlockList()} scope="from OAT" />);
+  render(<BlockedUsers blockList={ownerBlockList()} scope={SCOPE} />);
   const row = within(await rowOf(OWN_BLOCK.userId));
 
   expect(row.getByText(OWN_BLOCK.reason)).toBeTruthy();
@@ -50,7 +52,7 @@ test("an owner's own block shows its reason", async () => {
 
 test("Unblock removes the row and returns focus to Block a user", async () => {
   const blockList = ownerBlockList();
-  render(<BlockedUsers blockList={blockList} scope="from OAT" />);
+  render(<BlockedUsers blockList={blockList} scope={SCOPE} />);
   const row = await rowOf(OWN_BLOCK.userId);
   fireEvent.click(within(row).getByRole("button", { name: /^Unblock/ }));
 
@@ -62,7 +64,7 @@ test("Unblock removes the row and returns focus to Block a user", async () => {
 });
 
 test("a global ban in the owner's view is labelled and read-only", async () => {
-  render(<BlockedUsers blockList={ownerBlockList()} scope="from OAT" />);
+  render(<BlockedUsers blockList={ownerBlockList()} scope={SCOPE} />);
   const row = within(await rowOf(GLOBAL_BAN.userId));
 
   expect(row.getByText("Blocked by Discoin admins")).toBeTruthy();

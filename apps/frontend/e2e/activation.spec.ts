@@ -130,7 +130,7 @@ test("a currency code must be 3 or 4 letters", async ({ page }) => {
   await dialog.getByLabel("Name").fill("Shells");
   await code.fill("S1");
   await dialog.getByLabel("Weekly income median").fill("50000");
-  await dialog.getByLabel("Owner ID").fill(NEW_ADMIN_ID);
+  await dialog.getByLabel("Bot").selectOption({ label: "Harvest bot" });
   await dialog.getByRole("button", { name: "Add currency" }).click();
 
   await expect(code).toHaveAccessibleDescription(

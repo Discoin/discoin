@@ -3,7 +3,7 @@ import type {
   ReverseDirection,
   ReverseRequest,
   ReverseWindow,
-  Transaction,
+  TransactionRecord,
 } from "../api/types.js";
 
 const HOUR_MS = 3_600_000;
@@ -16,19 +16,19 @@ const WINDOW_MS: Record<ReverseWindow, number> = {
   all: Number.POSITIVE_INFINITY,
 };
 
-export type TransactionFilter = (transaction: Transaction) => boolean;
+export type TransactionFilter = (transaction: TransactionRecord) => boolean;
 
 const DIRECTION_FILTERS: Record<
   ReverseDirection,
-  (currencyId: string) => TransactionFilter
+  (botCurrencyIds: string[]) => TransactionFilter
 > = {
-  incoming: (currencyId) => (transaction) =>
-    transaction.toCurrencyId === currencyId,
-  outgoing: (currencyId) => (transaction) =>
-    transaction.fromCurrencyId === currencyId,
-  both: (currencyId) => (transaction) =>
-    transaction.toCurrencyId === currencyId ||
-    transaction.fromCurrencyId === currencyId,
+  incoming: (botCurrencyIds) => (transaction) =>
+    botCurrencyIds.includes(transaction.toCurrencyId),
+  outgoing: (botCurrencyIds) => (transaction) =>
+    botCurrencyIds.includes(transaction.fromCurrencyId),
+  both: (botCurrencyIds) => (transaction) =>
+    botCurrencyIds.includes(transaction.toCurrencyId) ||
+    botCurrencyIds.includes(transaction.fromCurrencyId),
 };
 
 export function adminReversalFilter(
@@ -46,14 +46,14 @@ export function adminReversalFilter(
 }
 
 export function ownerReversalFilter(
-  currencyId: string,
+  botCurrencyIds: string[],
   reverse: ReverseRequest,
 ): TransactionFilter {
   if (reverse.direction === undefined) {
     throw new ApiError(400, "Pick which direction to reverse.", "direction");
   }
 
-  return DIRECTION_FILTERS[reverse.direction](currencyId);
+  return DIRECTION_FILTERS[reverse.direction](botCurrencyIds);
 }
 
 export interface ReversalCriteria {
@@ -63,7 +63,7 @@ export interface ReversalCriteria {
   involves: TransactionFilter;
 }
 
-function submittedAt(transaction: Transaction): number {
+function submittedAt(transaction: TransactionRecord): number {
   return Date.parse(transaction.submittedAt);
 }
 
@@ -74,9 +74,9 @@ function senderOf(senders: Record<string, string>, id: string): string {
 }
 
 export function selectReversible(
-  transactions: Transaction[],
+  transactions: TransactionRecord[],
   criteria: ReversalCriteria,
-): Transaction[] {
+): TransactionRecord[] {
   const since = Date.now() - WINDOW_MS[criteria.window];
 
   return transactions

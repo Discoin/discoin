@@ -95,7 +95,9 @@ test("an owner must pick a direction, then reverses incoming trades", async ({
   await dialog.getByLabel("All time").check();
   await dialog.getByRole("button", { name: "Review reversal" }).click();
 
-  const incoming = dialog.getByLabel("Incoming (into your currency)");
+  const incoming = dialog.getByLabel(
+    "Incoming (into any of your bot's currencies)",
+  );
   await expect(incoming).toBeFocused();
   await expect(
     dialog.getByText("Pick which direction to reverse.").first(),

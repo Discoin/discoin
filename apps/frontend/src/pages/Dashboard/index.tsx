@@ -6,7 +6,6 @@ import { Loadable } from "../../components/shared/Loadable.jsx";
 import { PageIntro } from "../../components/layout/PageIntro.jsx";
 import { Panel } from "../../components/layout/Panel.jsx";
 import { TransactionTable } from "../../components/transactions/TransactionTable.jsx";
-import { activeCurrencies } from "../../lib/currencies.js";
 import { usePageTitle } from "../../lib/usePageTitle.js";
 import { useRequest } from "../../lib/useRequest.js";
 import "./style.scss";
@@ -15,7 +14,7 @@ function isEmpty<T>(list: T[]): boolean {
   return list.length === 0;
 }
 
-function RecentTransactions({ currencies }: { currencies: Currency[] }) {
+function RecentTransactions() {
   const transactions = useRequest(() => api.listRecentTransactions(), []);
 
   return (
@@ -30,19 +29,13 @@ function RecentTransactions({ currencies }: { currencies: Currency[] }) {
       }}
     >
       {(list) => (
-        <TransactionTable
-          caption="Recent transactions"
-          transactions={list}
-          currencies={currencies}
-        />
+        <TransactionTable caption="Recent transactions" transactions={list} />
       )}
     </Loadable>
   );
 }
 
-function Market({ currencies }: { currencies: Currency[] }) {
-  const active = activeCurrencies(currencies);
-
+function Market({ active }: { active: Currency[] }) {
   return (
     <>
       <Panel
@@ -66,7 +59,7 @@ function Market({ currencies }: { currencies: Currency[] }) {
         title="Recent transactions"
         description="Every trade through Discoin. User IDs stay private."
       >
-        <RecentTransactions currencies={currencies} />
+        <RecentTransactions />
       </Panel>
     </>
   );
@@ -74,7 +67,7 @@ function Market({ currencies }: { currencies: Currency[] }) {
 
 export function Dashboard() {
   usePageTitle(undefined);
-  const currencies = useRequest(() => api.listAllCurrencies(), []);
+  const currencies = useRequest(() => api.listCurrencies(), []);
 
   return (
     <div class="page">
@@ -87,12 +80,12 @@ export function Dashboard() {
         label="currencies"
         onRetry={currencies.reload}
         empty={{
-          when: (list) => isEmpty(activeCurrencies(list)),
+          when: isEmpty,
           title: "No currencies yet",
           body: <p>Currencies show up here once an admin adds them.</p>,
         }}
       >
-        {(list) => <Market currencies={list} />}
+        {(list) => <Market active={list} />}
       </Loadable>
     </div>
   );

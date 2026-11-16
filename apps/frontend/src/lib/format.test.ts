@@ -3,19 +3,94 @@ import { describe, expect, test } from "vitest";
 import {
   formatAmount,
   formatAxisAmount,
+  formatAxisValues,
   formatChange,
   formatLiquidity,
+  formatMultiplier,
   formatShortDate,
   formatTimestamp,
   formatValue,
   shortTransactionId,
 } from "./format.js";
+import { niceTicks } from "./ticks.js";
 
 describe("formatValue", () => {
-  test("shows 4 decimals so columns line up", () => {
-    expect(formatValue(0.007)).toBe("0.0070");
-    expect(formatValue(0.1)).toBe("0.1000");
-    expect(formatValue(1.25)).toBe("1.2500");
+  test.each([
+    [12_345.67, "12,300"],
+    [1_234.5, "1,230"],
+    [999.5, "1,000"],
+    [100, "100"],
+    [1.2345, "1.23"],
+    [1, "1"],
+    [0.1, "0.1"],
+    [0.1004, "0.1"],
+    [0.007, "0.007"],
+    [0.00012345, "0.000123"],
+    [1e7, "10,000,000"],
+    [1e-9, "0.000000001"],
+    [0, "0"],
+  ])("shows %s with at most 3 significant digits as %s", (value, shown) => {
+    expect(formatValue(value)).toBe(shown);
+  });
+
+  test.each([Number.NaN, Number.POSITIVE_INFINITY])("refuses %s", (value) => {
+    expect(() => formatValue(value)).toThrow(RangeError);
+  });
+});
+
+describe("formatAxisValues", () => {
+  test("gives every tick the same decimals and writes each one exactly", () => {
+    expect(formatAxisValues([0.09, 0.095, 0.1, 0.105])).toEqual([
+      "0.090",
+      "0.095",
+      "0.100",
+      "0.105",
+    ]);
+  });
+
+  test("keeps ticks apart that 3 significant digits would merge", () => {
+    expect(formatAxisValues([12_340, 12_345, 12_350])).toEqual([
+      "12,340",
+      "12,345",
+      "12,350",
+    ]);
+  });
+
+  test("leaves round ticks without decimals", () => {
+    expect(formatAxisValues([70_000, 80_000, 90_000])).toEqual([
+      "70,000",
+      "80,000",
+      "90,000",
+    ]);
+  });
+
+  test("writes tiny ticks out in full", () => {
+    expect(formatAxisValues([1e-9, 2e-9])).toEqual([
+      "0.000000001",
+      "0.000000002",
+    ]);
+  });
+
+  test("never gives two ticks the same label, from 1e-9 to 1e7", () => {
+    for (let exponent = -9; exponent <= 7; exponent++) {
+      const low = 1.2345 * 10 ** exponent;
+      const ticks = niceTicks(low, low * 1.01);
+      const labels = formatAxisValues(ticks);
+
+      expect(new Set(labels).size).toBe(ticks.length);
+      expect(labels.map((label) => Number(label.replace(/,/g, "")))).toEqual(
+        ticks,
+      );
+    }
+  });
+});
+
+describe("formatMultiplier", () => {
+  test("shows the multiplier exactly, without trailing zeros", () => {
+    expect(formatMultiplier(10)).toBe("10");
+    expect(formatMultiplier(2.5)).toBe("2.5");
+    expect(formatMultiplier(1.234)).toBe("1.234");
+    expect(formatMultiplier(1_000.5)).toBe("1,000.5");
   });
 });
 

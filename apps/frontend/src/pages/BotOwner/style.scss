@@ -1,0 +1,30 @@
+.owner-pickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  max-width: 44rem;
+
+  > .picker {
+    flex: 1 1 16rem;
+  }
+}
+
+.owner-group {
+  display: grid;
+  gap: var(--space-6);
+  min-width: 0;
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--line);
+}
+
+.owner-group__message:focus-visible,
+.owner-group__title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.owner-group__title {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}

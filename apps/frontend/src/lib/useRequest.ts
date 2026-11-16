@@ -9,6 +9,7 @@ export interface Request<T> {
   state: RequestState<T>;
   reload: () => void;
   update: (data: T) => void;
+  change: (apply: (data: T) => T) => void;
 }
 
 function asError(reason: unknown): Error {
@@ -41,6 +42,17 @@ export function useRequest<T>(
     (data: T) => setState({ status: "ready", data }),
     [],
   );
+  const change = useCallback(
+    (apply: (data: T) => T) =>
+      setState((current) => {
+        if (current.status !== "ready") {
+          throw new Error("Changed data that hasn't loaded");
+        }
 
-  return { state, reload, update };
+        return { status: "ready", data: apply(current.data) };
+      }),
+    [],
+  );
+
+  return { state, reload, update, change };
 }

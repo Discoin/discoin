@@ -1,5 +1,5 @@
 import { api } from "../../api/client.js";
-import type { Currency, Transaction } from "../../api/types.js";
+import type { Transaction } from "../../api/types.js";
 import { ActionStatus } from "../../components/shared/ActionStatus.jsx";
 import { Button } from "../../components/shared/Button.jsx";
 import { EmptyState } from "../../components/shared/EmptyState.jsx";
@@ -9,10 +9,9 @@ import { useAction } from "../../lib/useAction.js";
 
 interface PendingWebhooksProps {
   pending: Transaction[];
-  currencies: Currency[];
 }
 
-export function PendingWebhooks({ pending, currencies }: PendingWebhooksProps) {
+export function PendingWebhooks({ pending }: PendingWebhooksProps) {
   const action = useAction();
 
   function resend(transactionId: string) {
@@ -26,7 +25,7 @@ export function PendingWebhooks({ pending, currencies }: PendingWebhooksProps) {
   if (pending.length === 0) {
     return (
       <EmptyState title="Nothing pending">
-        <p>Every transaction into this currency has been handled.</p>
+        <p>Every transaction into this bot's currencies has been handled.</p>
       </EmptyState>
     );
   }
@@ -36,23 +35,28 @@ export function PendingWebhooks({ pending, currencies }: PendingWebhooksProps) {
       <TransactionTable
         caption="Pending transactions"
         transactions={pending}
-        currencies={currencies}
-        action={{
-          header: "Webhook",
-          render: (transaction) => (
-            <Button
-              variant="secondary"
-              disabled={action.state.status === "pending"}
-              onClick={() => resend(transaction.id)}
-            >
-              Resend
-              <span class="visually-hidden">
-                {" "}
-                receipt for {shortTransactionId(transaction.id)}
-              </span>
-            </Button>
-          ),
-        }}
+        extraColumns={[
+          {
+            header: "Currency",
+            render: (transaction) => transaction.toCurrency.abbreviation,
+          },
+          {
+            header: "Webhook",
+            render: (transaction) => (
+              <Button
+                variant="secondary"
+                disabled={action.state.status === "pending"}
+                onClick={() => resend(transaction.id)}
+              >
+                Resend
+                <span class="visually-hidden">
+                  {" "}
+                  receipt for {shortTransactionId(transaction.id)}
+                </span>
+              </Button>
+            ),
+          },
+        ]}
       />
       <ActionStatus state={action.state} inlineFields={[]} />
     </div>

@@ -1,11 +1,11 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-import { openPage, waitForData } from "./support.js";
+import { choosePickerOption, openPage, sidewaysOverflow } from "./support.js";
 
 const NEW_BLOCK_ID = "700000000000000001";
 const GLOBAL_BAN_IDS = ["198273645019283746", "587261093847562019"];
 const BLOCK_PAGES = [
-  { path: "/owner", title: "Block a user from OAT" },
+  { path: "/owner", title: "Block a user from Harvest bot" },
   { path: "/admin", title: "Block a user everywhere" },
 ];
 
@@ -78,15 +78,12 @@ test("a bad user ID keeps the block dialog open with the error focused", async (
   await expect(userId).toBeFocused();
 });
 
-for (const currency of ["OAT (Oats)", "TKT (Tickets)"]) {
-  test(`global bans show read-only on the ${currency} owner page`, async ({
+for (const bot of ["Harvest bot", "Ticket bot"]) {
+  test(`global bans show read-only for ${bot} on the owner page`, async ({
     page,
   }) => {
     await openPage(page, "/owner");
-    await page
-      .getByLabel("Currency", { exact: true })
-      .selectOption({ label: currency });
-    await waitForData(page);
+    await choosePickerOption(page, "Bot", bot);
 
     for (const userId of GLOBAL_BAN_IDS) {
       const row = blockedRow(page, userId);
@@ -98,10 +95,6 @@ for (const currency of ["OAT (Oats)", "TKT (Tickets)"]) {
 
 function blockedFrame(page: Page) {
   return page.getByRole("region", { name: "Blocked users table" });
-}
-
-function sidewaysOverflow(frame: Locator) {
-  return frame.evaluate((element) => element.scrollWidth - element.clientWidth);
 }
 
 for (const path of ["/admin", "/owner"]) {

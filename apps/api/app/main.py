@@ -11,7 +11,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from app.admin import routes as admin_routes
-from app.admin.first_admin import seed_first_admin
+from app.admin.first_admin import seed_first_admins
 from app.auth import routes as auth_routes
 from app.auth.discord import DiscordOAuth
 from app.auth.sessions import SESSION_COOKIE, hash_secret
@@ -97,7 +97,7 @@ def create_app() -> FastAPI:
 def prepare_database(settings: Settings) -> None:
     with psycopg.connect(settings.database_url, autocommit=True) as connection:
         apply_migrations(connection, MIGRATIONS_DIRECTORY)
-        seed_first_admin(connection, settings.first_admin_id)
+        seed_first_admins(connection, settings.first_admin_ids)
 
 
 def install_routes(app: FastAPI) -> None:
@@ -125,7 +125,7 @@ def install_middleware(app: FastAPI, settings: Settings) -> None:
 
     @app.middleware("http")
     async def limit_rate(request: Request, call_next: NextHandler) -> Response:
-        if request.url.path in UNLIMITED_PATHS or within_rate_limits(request):
+        if route_path(request) in UNLIMITED_PATHS or within_rate_limits(request):
             return await call_next(request)
 
         response = error_response(429, "Too many requests. Wait a minute and try again.", None)
@@ -172,6 +172,10 @@ def is_cross_site_session_write(request: Request, allowed_origin: str) -> bool:
         return False
 
     return request.headers.get("origin") != allowed_origin
+
+
+def route_path(request: Request) -> str:
+    return request.scope["path"].removeprefix(request.scope["root_path"])
 
 
 def within_rate_limits(request: Request) -> bool:

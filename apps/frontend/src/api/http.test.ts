@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { ApiError, DailyCapError } from "./errors.js";
+import { ApiError, ConnectionError, DailyCapError } from "./errors.js";
 import { createHttpApi } from "./http.js";
 
 const api = createHttpApi();
@@ -65,10 +65,10 @@ describe("requests", () => {
   test("writes send JSON bodies with the API's field names", async () => {
     const fetchMock = stubFetch(noContent());
 
-    await api.setWebhookUrl("c1", "https://bot.example.com/hook");
+    await api.setWebhookUrl("b1", "https://bot.example.com/hook");
 
     const { url, init } = lastCall(fetchMock);
-    expect(url).toBe("/api/currencies/c1/webhook-url");
+    expect(url).toBe("/api/bots/b1/webhook-url");
     expect(init.method).toBe("PUT");
     expect(init.headers).toEqual({ "Content-Type": "application/json" });
     expect(JSON.parse(init.body as string)).toEqual({
@@ -101,9 +101,47 @@ describe("requests", () => {
   });
 
   test("a regenerated token comes back as plain text", async () => {
-    stubFetch(jsonResponse(200, { token: "dsc_live_abc" }));
+    const fetchMock = stubFetch(jsonResponse(200, { token: "dsc_live_abc" }));
 
-    expect(await api.regenerateApiToken("c1")).toBe("dsc_live_abc");
+    expect(await api.regenerateApiToken("b1")).toBe("dsc_live_abc");
+    expect(lastCall(fetchMock).url).toBe("/api/bots/b1/api-token");
+  });
+
+  test("a webhook secret is generated for the bot", async () => {
+    const fetchMock = stubFetch(jsonResponse(200, { secret: "whsec_abc" }));
+
+    expect(await api.generateWebhookSecret("b1")).toBe("whsec_abc");
+    expect(lastCall(fetchMock).url).toBe("/api/bots/b1/webhook-secret");
+  });
+
+  test("removing the webhook deletes the bot's URL", async () => {
+    const fetchMock = stubFetch(noContent());
+
+    await api.removeWebhookUrl("b1");
+
+    const { url, init } = lastCall(fetchMock);
+    expect(url).toBe("/api/bots/b1/webhook-url");
+    expect(init.method).toBe("DELETE");
+  });
+
+  test("the owner's pending list is the bot's", async () => {
+    const fetchMock = stubFetch(jsonResponse(200, []));
+
+    await api.listPendingTransactions("b1");
+
+    expect(lastCall(fetchMock).url).toBe("/api/bots/b1/transactions/pending");
+  });
+
+  test("owner blocks live under the bot", async () => {
+    const fetchMock = stubFetch(noContent());
+    const blocks = api.botBlocks("b1");
+
+    await blocks.unblock("530917284650193847");
+
+    expect(blocks.level).toBe("bot");
+    expect(lastCall(fetchMock).url).toBe(
+      "/api/bots/b1/blocks/530917284650193847",
+    );
   });
 
   test("a command that answers with content is refused", async () => {
@@ -142,7 +180,7 @@ describe("errors", () => {
       jsonResponse(403, { status: 403, message: "Not yours.", field: null }),
     );
 
-    const error = await api.listOwnedCurrencies().catch((reason) => reason);
+    const error = await api.listOwnedBots().catch((reason) => reason);
 
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).field).toBeUndefined();
@@ -164,13 +202,25 @@ describe("errors", () => {
     expect((error as DailyCapError).maxAmount).toBe(500.25);
   });
 
-  test("a response without an error body is a plain Error naming the status", async () => {
+  test("a response without an error body is a ConnectionError naming the status", async () => {
     stubFetch(new Response("Bad gateway", { status: 502 }));
 
     const error = await api.listCurrencies().catch((reason) => reason);
 
-    expect(error).not.toBeInstanceOf(ApiError);
+    expect(error).toBeInstanceOf(ConnectionError);
     expect((error as Error).message).toContain("502");
+  });
+
+  test("a request that can't be sent is a ConnectionError", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new TypeError("Failed to fetch")),
+    );
+
+    const error = await api.setDailyCap("c1", 10).catch((reason) => reason);
+
+    expect(error).toBeInstanceOf(ConnectionError);
+    expect((error as Error).message).toContain("Failed to fetch");
   });
 });
 
@@ -210,11 +260,11 @@ describe("webhook test", () => {
   test("posts to the test endpoint and returns the endpoint's status", async () => {
     const fetchMock = stubFetch(jsonResponse(200, { status: 204 }));
 
-    const status = await api.testWebhook("c1");
+    const status = await api.testWebhook("b1");
 
     const { url, init } = lastCall(fetchMock);
     expect(status).toBe(204);
-    expect(url).toBe("/api/currencies/c1/webhook-test");
+    expect(url).toBe("/api/bots/b1/webhook-test");
     expect(init.method).toBe("POST");
   });
 
@@ -227,7 +277,7 @@ describe("webhook test", () => {
       }),
     );
 
-    await expect(api.testWebhook("c1")).rejects.toThrow(
+    await expect(api.testWebhook("b1")).rejects.toThrow(
       "Your webhook answered 500. Discoin expects a 2xx answer.",
     );
   });

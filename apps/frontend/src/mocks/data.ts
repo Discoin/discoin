@@ -2,9 +2,9 @@ import type {
   AdminUser,
   BlockedUser,
   Currency,
-  CurrencySettings,
+  CurrencyName,
   ReservePoint,
-  Transaction,
+  TransactionRecord,
   TransactionStatus,
 } from "../api/types.js";
 import {
@@ -18,6 +18,7 @@ const SPARKLINE_POINTS = 8;
 const DAY_MS = 86_400_000;
 const WAVE_FREQUENCY = 0.7;
 const HISTORY_END = Date.parse("2026-11-13T00:00:00Z");
+const SEED_MULTIPLIER = 4;
 
 interface CurrencySeed {
   id: string;
@@ -131,24 +132,41 @@ export const sampleWeeklyMedians: Record<string, number> = Object.fromEntries(
   CURRENCY_SEEDS.map((seed) => [seed.id, seed.weeklyMedian]),
 );
 
+export const sampleMultipliers: Record<string, number> = Object.fromEntries(
+  CURRENCY_SEEDS.map((seed) => [seed.id, SEED_MULTIPLIER]),
+);
+
 const [OATS, PEBBLES, SCRAP, GEMS, TICKETS] = sampleCurrencies;
 
 const CURRENT_USER_ID = "412358906715234305";
 const TRADER_ID = "530917284650193847";
 const OTHER_TRADER_ID = "829304715620394857";
 
+export interface RemovedCurrency extends CurrencyName {
+  reserve: number;
+}
+
+const CORN: RemovedCurrency = {
+  id: "0199a0b4-6e21-7c3a-9d50-3f81c2a7e9b4",
+  abbreviation: "CRN",
+  name: "Corn",
+  reserve: 640_000,
+};
+
+export const sampleRemovedCurrencies: RemovedCurrency[] = [CORN];
+
 interface TransactionSeed {
   id: string;
   senderId: string;
-  from: Currency;
-  to: Currency;
+  from: Pick<Currency, "id" | "reserve">;
+  to: Pick<Currency, "id" | "reserve">;
   amount: number;
   status: TransactionStatus;
   submittedAt: string;
   handledAt: string | null;
 }
 
-function toTransaction(seed: TransactionSeed): Transaction {
+function toTransaction(seed: TransactionSeed): TransactionRecord {
   return {
     id: seed.id,
     fromCurrencyId: seed.from.id,
@@ -265,9 +283,19 @@ const TRANSACTION_SEEDS: TransactionSeed[] = [
     submittedAt: "2026-09-01T10:12:05Z",
     handledAt: "2026-09-01T10:12:09Z",
   },
+  {
+    id: "01998f2a-4b70-7d19-8e36-c5a07b2d1f68",
+    senderId: TRADER_ID,
+    from: CORN,
+    to: TICKETS,
+    amount: 3_000,
+    status: "Completed",
+    submittedAt: "2026-08-20T16:40:12Z",
+    handledAt: "2026-08-20T16:40:15Z",
+  },
 ];
 
-export const sampleTransactions: Transaction[] =
+export const sampleTransactions: TransactionRecord[] =
   TRANSACTION_SEEDS.map(toTransaction);
 
 export const sampleTransactionSenders: Record<string, string> =
@@ -278,39 +306,100 @@ export const sampleCurrentUser: AdminUser = {
   username: "coinkeeper",
 };
 
-export const sampleOwnerIds: Record<string, string> = {
-  [OATS.id]: sampleCurrentUser.userId,
-  [PEBBLES.id]: "305918264730192845",
-  [SCRAP.id]: "305918264730192845",
-  [GEMS.id]: "640281937465019283",
-  [TICKETS.id]: sampleCurrentUser.userId,
+export interface MockBot {
+  id: string;
+  name: string;
+  discordId: string;
+  ownerId: string;
+  hasApiToken: boolean;
+  hasWebhookSecret: boolean;
+  webhookUrl: string | null;
+}
+
+const ROCK_OWNER_ID = "305918264730192845";
+const SPARE_OWNER_ID = "640281937465019283";
+
+const OAT_BOT: MockBot = {
+  id: "019a8b20-1a01-7c10-9e01-6a1b2c3d4e01",
+  name: "Harvest bot",
+  discordId: "990000000000000001",
+  ownerId: CURRENT_USER_ID,
+  hasApiToken: true,
+  hasWebhookSecret: true,
+  webhookUrl: "https://oats-bot.example.com/discoin",
 };
 
-export const sampleSettings: Record<string, CurrencySettings> = {
-  [OATS.id]: {
-    hasApiToken: true,
-    hasWebhookSecret: true,
-    webhookUrl: "https://oats-bot.example.com/discoin",
-    dailyCap: 5_000,
-  },
-  [TICKETS.id]: {
-    hasApiToken: false,
-    hasWebhookSecret: false,
-    webhookUrl: null,
-    dailyCap: null,
-  },
+const TICKET_BOT: MockBot = {
+  id: "019a8b20-1a05-7c10-9e05-6a1b2c3d4e05",
+  name: "Ticket bot",
+  discordId: "990000000000000005",
+  ownerId: CURRENT_USER_ID,
+  hasApiToken: false,
+  hasWebhookSecret: false,
+  webhookUrl: null,
 };
 
-export const sampleCurrencyBlocks: Record<string, BlockedUser[]> = {
-  [OATS.id]: [
+const ROCK_BOT: MockBot = {
+  id: "019a8b20-1a02-7c10-9e02-6a1b2c3d4e02",
+  name: "Rock bot",
+  discordId: "990000000000000002",
+  ownerId: ROCK_OWNER_ID,
+  hasApiToken: true,
+  hasWebhookSecret: false,
+  webhookUrl: null,
+};
+
+const SPARE_BOT: MockBot = {
+  id: "019a8b20-1a04-7c10-9e04-6a1b2c3d4e04",
+  name: "Spare bot",
+  discordId: "990000000000000004",
+  ownerId: SPARE_OWNER_ID,
+  hasApiToken: false,
+  hasWebhookSecret: false,
+  webhookUrl: null,
+};
+
+export const sampleBots: MockBot[] = [OAT_BOT, ROCK_BOT, SPARE_BOT, TICKET_BOT];
+
+export const sampleBotIds: Record<string, string | null> = {
+  [OATS.id]: OAT_BOT.id,
+  [PEBBLES.id]: ROCK_BOT.id,
+  [SCRAP.id]: OAT_BOT.id,
+  [GEMS.id]: null,
+  [TICKETS.id]: TICKET_BOT.id,
+};
+
+export const sampleDailyCaps: Record<string, number | null> = {
+  [OATS.id]: 5_000,
+  [PEBBLES.id]: null,
+  [SCRAP.id]: null,
+  [GEMS.id]: null,
+  [TICKETS.id]: null,
+};
+
+export const sampleBotBlocks: Record<string, BlockedUser[]> = {
+  [OAT_BOT.id]: [
     {
       userId: "293847561029384756",
       reason: "Farmed oats with an alt account.",
       blockedAt: "2026-11-02T14:22:10Z",
-      level: "currency",
+      level: "bot",
     },
   ],
-  [TICKETS.id]: [],
+  [TICKET_BOT.id]: [],
+  [ROCK_BOT.id]: [],
+  [SPARE_BOT.id]: [],
+};
+
+export const sampleCurrencyBlocks: Record<string, BlockedUser[]> = {
+  [GEMS.id]: [
+    {
+      userId: "481920374650192837",
+      reason: "Sent gems from stolen accounts.",
+      blockedAt: "2026-10-30T09:12:44Z",
+      level: "bot",
+    },
+  ],
 };
 
 export const sampleGlobalBlocks: BlockedUser[] = [

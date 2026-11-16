@@ -23,10 +23,12 @@ from tests.factories import (
     OWNER_ID,
     USER_ID,
     WEBHOOK_SECRET_KEY,
+    bot_of,
     create_currency,
     create_transaction,
     log_in,
 )
+from tests.webhooks.receiver import connect_unreadable_webhook
 
 BOX = SecretBox.from_base64(WEBHOOK_SECRET_KEY)
 
@@ -63,9 +65,10 @@ def test_webhook_url_cannot_point_at_a_private_host(
 ) -> None:
     currency_id = create_currency(connection, "OAT", 100_000)
     log_in(client, connection, OWNER_ID)
-    client.post(f"/currencies/{currency_id}/webhook-secret")
+    bot_id = bot_of(connection, currency_id)
+    client.post(f"/bots/{bot_id}/webhook-secret")
 
-    response = client.put(f"/currencies/{currency_id}/webhook-url", json={"webhookUrl": url})
+    response = client.put(f"/bots/{bot_id}/webhook-url", json={"webhookUrl": url})
 
     assert (response.status_code, response.json()["field"]) == (400, "webhookUrl")
 
@@ -105,6 +108,18 @@ def test_rate_limit_answers_429_with_retry_after(client: TestClient) -> None:
     assert limited.headers["retry-after"] == "60"
     assert limited.json()["status"] == 429
     assert client.get("/health").status_code == 200
+
+
+@pytest.mark.parametrize("prefix", ["", "/api"])
+def test_health_is_never_rate_limited_and_other_paths_are(client: TestClient, prefix: str) -> None:
+    client.app.state.address_limiter = RateLimiter(limit=1, window_seconds=60)
+    proxied = TestClient(client.app, root_path=prefix)
+
+    health = [proxied.get(f"{prefix}/health").status_code for _ in range(3)]
+    currencies = [proxied.get(f"{prefix}/currencies").status_code for _ in range(2)]
+
+    assert health == [200, 200, 200]
+    assert currencies == [200, 429]
 
 
 def test_rate_limit_counts_each_credential_separately() -> None:
@@ -208,17 +223,13 @@ def test_webhook_transport_reports_unresolvable_hosts() -> None:
 def test_unreadable_secret_is_a_failed_attempt(client: TestClient, connection: psycopg.Connection) -> None:
     rich = create_currency(connection, "RCH", 1_000_000)
     poor = create_currency(connection, "POR", 100_000)
-    connection.execute(
-        "UPDATE currencies SET webhook_url = 'https://bot.example.com', webhook_secret_sealed = 'v1.AAAA' WHERE id = %s",
-        (poor,),
-    )
-    connection.execute("UPDATE currencies SET owner_id = %s", (OWNER_ID,))
+    connect_unreadable_webhook(connection, poor)
     log_in(client, connection, OWNER_ID)
-    token = client.post(f"/currencies/{rich}/api-token").json()["token"]
+    token = client.post(f"/bots/{bot_of(connection, rich)}/api-token").json()["token"]
     client.post(
         "/transactions",
         headers={"Authorization": f"Bearer {token}"},
-        json={"userId": USER_ID, "toCurrencyId": str(poor), "amount": 1000},
+        json={"userId": USER_ID, "fromCurrencyId": str(rich), "toCurrencyId": str(poor), "amount": 1000},
     )
     sender = WebhookSender(httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200))), BOX)
 
@@ -262,6 +273,19 @@ def test_openapi_lists_only_the_endpoints_bots_use(client: TestClient) -> None:
     ]
     assert sorted(paths["/transactions"]) == ["get", "post"]
     assert sorted(paths["/transactions/{transaction_id}"]) == ["patch"]
+
+
+def test_docs_behind_the_dashboard_proxy_load_the_schema_under_its_prefix(client: TestClient) -> None:
+    prefix = "/api"
+    proxied = TestClient(client.app, base_url="https://testserver", root_path=prefix)
+
+    docs = proxied.get(f"{prefix}/docs")
+    schema = proxied.get(f"{prefix}/openapi.json").json()
+
+    assert docs.status_code == 200
+    assert f"url: '{prefix}/openapi.json'" in docs.text
+    assert schema["servers"] == [{"url": prefix}]
+    assert "/currencies" in schema["paths"]
 
 
 def test_hidden_endpoints_still_work(client: TestClient) -> None:

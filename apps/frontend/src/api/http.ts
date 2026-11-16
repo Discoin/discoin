@@ -1,17 +1,22 @@
 import type { BlockListApi, DiscoinApi } from "./client.js";
-import { ApiError, DailyCapError } from "./errors.js";
+import { ApiError, ConnectionError, DailyCapError } from "./errors.js";
 import type {
+  AdminBot,
   AdminCurrency,
   AdminUser,
   BlockedUser,
   BlockLevel,
   BlockResult,
+  BotSettings,
+  BotWithCurrencies,
   Currency,
   CurrencySettings,
   CurrentUser,
   PendingTransaction,
+  RemovalPreview,
   ReservePoint,
   ReverseRequest,
+  SavedCurrency,
   Transaction,
 } from "./types.js";
 
@@ -57,9 +62,19 @@ async function readError(response: Response): Promise<Error> {
   const body: unknown = isJson ? await response.json() : undefined;
   if (isErrorBody(body)) return toApiError(body);
 
-  return new Error(
+  return new ConnectionError(
     `The Discoin API answered ${response.status} ${response.statusText} without an error body.`,
   );
+}
+
+async function reach(path: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(API_BASE + path, init);
+  } catch (reason) {
+    throw new ConnectionError(
+      `Couldn't reach the Discoin API: ${String(reason)}`,
+    );
+  }
 }
 
 async function send(
@@ -67,7 +82,7 @@ async function send(
   path: string,
   body?: unknown,
 ): Promise<Response> {
-  const response = await fetch(API_BASE + path, {
+  const response = await reach(path, {
     method,
     credentials: "same-origin",
     headers:
@@ -129,9 +144,7 @@ function createBlockList(level: BlockLevel, base: string): BlockListApi {
 }
 
 async function getMe(): Promise<CurrentUser | null> {
-  const response = await fetch(`${API_BASE}/me`, {
-    credentials: "same-origin",
-  });
+  const response = await reach("/me", { credentials: "same-origin" });
   if (response.status === UNAUTHORIZED) return null;
 
   if (!response.ok) throw await readError(response);
@@ -142,8 +155,6 @@ async function getMe(): Promise<CurrentUser | null> {
 export function createHttpApi(): DiscoinApi {
   return {
     listCurrencies: () => request<Currency[]>("GET", "/currencies"),
-    listAllCurrencies: () =>
-      request<Currency[]>("GET", "/currencies?includeInactive=true"),
     getCurrency: (abbreviation) =>
       request<Currency>("GET", `/currencies/${segment(abbreviation)}`),
     listCurrencyTransactions: (currencyId) =>
@@ -176,7 +187,9 @@ export function createHttpApi(): DiscoinApi {
     logout: () => command("POST", "/auth/logout"),
     listMyTransactions: () => request<Transaction[]>("GET", "/me/transactions"),
 
-    listOwnedCurrencies: () => request<Currency[]>("GET", "/owner/currencies"),
+    listOwnedBots: () => request<BotWithCurrencies[]>("GET", "/owner/bots"),
+    getBotSettings: (botId) =>
+      request<BotSettings>("GET", `/bots/${segment(botId)}/settings`),
     getCurrencySettings: (currencyId) =>
       request<CurrencySettings>(
         "GET",
@@ -184,32 +197,32 @@ export function createHttpApi(): DiscoinApi {
       ),
     updateCurrencyDetails: (currencyId, details) =>
       request<Currency>("PATCH", `/currencies/${segment(currencyId)}`, details),
-    regenerateApiToken: async (currencyId) => {
+    regenerateApiToken: async (botId) => {
       const issued = await request<{ token: string }>(
         "POST",
-        `/currencies/${segment(currencyId)}/api-token`,
+        `/bots/${segment(botId)}/api-token`,
       );
 
       return issued.token;
     },
-    generateWebhookSecret: async (currencyId) => {
+    generateWebhookSecret: async (botId) => {
       const issued = await request<{ secret: string }>(
         "POST",
-        `/currencies/${segment(currencyId)}/webhook-secret`,
+        `/bots/${segment(botId)}/webhook-secret`,
       );
 
       return issued.secret;
     },
-    setWebhookUrl: (currencyId, url) =>
-      command("PUT", `/currencies/${segment(currencyId)}/webhook-url`, {
+    setWebhookUrl: (botId, url) =>
+      command("PUT", `/bots/${segment(botId)}/webhook-url`, {
         webhookUrl: url,
       }),
-    removeWebhookUrl: (currencyId) =>
-      command("DELETE", `/currencies/${segment(currencyId)}/webhook-url`),
-    testWebhook: async (currencyId) => {
+    removeWebhookUrl: (botId) =>
+      command("DELETE", `/bots/${segment(botId)}/webhook-url`),
+    testWebhook: async (botId) => {
       const result = await request<{ status: number }>(
         "POST",
-        `/currencies/${segment(currencyId)}/webhook-test`,
+        `/bots/${segment(botId)}/webhook-test`,
       );
 
       return result.status;
@@ -220,26 +233,40 @@ export function createHttpApi(): DiscoinApi {
       }),
     removeDailyCap: (currencyId) =>
       command("DELETE", `/currencies/${segment(currencyId)}/daily-cap`),
-    listPendingTransactions: (currencyId) =>
+    listPendingTransactions: (botId) =>
       request<PendingTransaction[]>(
         "GET",
-        `/currencies/${segment(currencyId)}/transactions/pending`,
+        `/bots/${segment(botId)}/transactions/pending`,
       ),
     resendWebhook: (transactionId) =>
       command("POST", `/transactions/${segment(transactionId)}/resend-webhook`),
-    currencyBlocks: (currencyId) =>
-      createBlockList("currency", `/currencies/${segment(currencyId)}/blocks`),
+    botBlocks: (botId) =>
+      createBlockList("bot", `/bots/${segment(botId)}/blocks`),
 
     listAdminCurrencies: () =>
       request<AdminCurrency[]>("GET", "/admin/currencies"),
     addCurrency: (currency) =>
       request<AdminCurrency>("POST", "/admin/currencies", currency),
     updateCurrency: (currencyId, changes) =>
-      request<AdminCurrency>(
+      request<SavedCurrency>(
         "PATCH",
         `/admin/currencies/${segment(currencyId)}`,
         changes,
       ),
+    previewCurrencyRemoval: (currencyId) =>
+      request<RemovalPreview>(
+        "GET",
+        `/admin/currencies/${segment(currencyId)}/removal`,
+      ),
+    removeCurrency: (currencyId) =>
+      command("DELETE", `/admin/currencies/${segment(currencyId)}`),
+    listAdminBots: () => request<AdminBot[]>("GET", "/admin/bots"),
+    addBot: (bot) => request<AdminBot>("POST", "/admin/bots", bot),
+    updateBot: (botId, changes) =>
+      request<AdminBot>("PATCH", `/admin/bots/${segment(botId)}`, changes),
+    previewBotRemoval: (botId) =>
+      request<RemovalPreview>("GET", `/admin/bots/${segment(botId)}/removal`),
+    removeBot: (botId) => command("DELETE", `/admin/bots/${segment(botId)}`),
     globalBlocks: createBlockList("global", "/admin/blocks"),
     listAdmins: () => request<AdminUser[]>("GET", "/admin/admins"),
     grantAdmin: (userId) =>

@@ -1,5 +1,6 @@
 import type { ComponentChildren } from "preact";
-import { useEffect, useId, useRef } from "preact/hooks";
+import { useId, useRef } from "preact/hooks";
+import { useModal } from "./useModal.js";
 import "./Dialog.scss";
 
 const FIRST_FIELD = "input, select, textarea, button:not(.dialog__close)";
@@ -20,20 +21,7 @@ function focusFirstField(dialog: HTMLDialogElement): void {
 export function Dialog({ title, onClose, children }: DialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (dialog === null) throw new Error("The dialog didn't render");
-
-    const opener = document.activeElement;
-    dialog.showModal();
-    focusFirstField(dialog);
-
-    return () => {
-      dialog.close();
-      if (opener instanceof HTMLElement) opener.focus();
-    };
-  }, []);
+  useModal(dialogRef, focusFirstField);
 
   return (
     <dialog

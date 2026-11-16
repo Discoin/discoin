@@ -5,24 +5,36 @@ import { ActionStatus } from "../../components/shared/ActionStatus.jsx";
 import { Button } from "../../components/shared/Button.jsx";
 import { Field } from "../../components/shared/Field.jsx";
 import { useAction } from "../../lib/useAction.js";
+import { noticingDeactivation } from "./inactiveRefusal.js";
+import { useUnsavedChanges } from "./unsavedChanges.js";
 
 interface DetailsFormProps {
   currency: Currency;
   onSaved: (currency: Currency) => void;
+  onDeactivated: () => void;
 }
 
-export function DetailsForm({ currency, onSaved }: DetailsFormProps) {
+export function DetailsForm({
+  currency,
+  onSaved,
+  onDeactivated,
+}: DetailsFormProps) {
   const [name, setName] = useState(currency.name);
   const [abbreviation, setAbbreviation] = useState(currency.abbreviation);
   const action = useAction();
+  useUnsavedChanges("Name and abbreviation", {
+    hasChanges:
+      name !== currency.name || abbreviation !== currency.abbreviation,
+    isSaving: action.state.status === "pending",
+  });
 
   function save(event: Event) {
     event.preventDefault();
     void action.run(async () => {
-      const updated = await api.updateCurrencyDetails(currency.id, {
-        name,
-        abbreviation,
-      });
+      const updated = await noticingDeactivation(
+        api.updateCurrencyDetails(currency.id, { name, abbreviation }),
+        onDeactivated,
+      );
       setName(updated.name);
       setAbbreviation(updated.abbreviation);
       onSaved(updated);

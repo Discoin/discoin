@@ -4,6 +4,12 @@ from urllib.parse import urlsplit
 
 from app.core.validation import DISCORD_ID_PATTERN
 
+FIRST_ADMIN_IDS = "FIRST_ADMIN_IDS"
+RENAMED_FIRST_ADMIN_ID = "FIRST_ADMIN_ID"
+LIST_SEPARATOR = ","
+ENTRY_PADDING = " \t"
+DISCORD_ID_LIST_EXPECTATION = "a comma separated list of Discord user IDs of 17 to 20 digits"
+
 
 class MissingSettingError(RuntimeError):
     def __init__(self, name: str) -> None:
@@ -20,7 +26,7 @@ class InvalidSettingError(RuntimeError):
 @dataclass(frozen=True)
 class Settings:
     database_url: str
-    first_admin_id: str
+    first_admin_ids: tuple[str, ...]
     discord_client_id: str
     discord_client_secret: str
     discord_redirect_uri: str
@@ -37,7 +43,7 @@ class Settings:
     def from_environment(cls) -> Settings:
         return cls(
             database_url=require_environment_variable("DATABASE_URL"),
-            first_admin_id=require_discord_id("FIRST_ADMIN_ID"),
+            first_admin_ids=require_first_admin_ids(),
             discord_client_id=require_environment_variable("DISCORD_CLIENT_ID"),
             discord_client_secret=require_environment_variable("DISCORD_CLIENT_SECRET"),
             discord_redirect_uri=require_url("DISCORD_REDIRECT_URI"),
@@ -60,6 +66,40 @@ def require_discord_id(name: str) -> str:
         raise InvalidSettingError(name, "a Discord user ID of 17 to 20 digits")
 
     return value
+
+
+def require_first_admin_ids() -> tuple[str, ...]:
+    if RENAMED_FIRST_ADMIN_ID in os.environ:
+        raise InvalidSettingError(RENAMED_FIRST_ADMIN_ID, f"removed, it was renamed to {FIRST_ADMIN_IDS}")
+
+    return require_discord_id_list(FIRST_ADMIN_IDS)
+
+
+def require_discord_id_list(name: str) -> tuple[str, ...]:
+    value = require_environment_variable(name)
+    entries = tuple(entry.strip(ENTRY_PADDING) for entry in value.split(LIST_SEPARATOR))
+
+    problem = find_discord_id_list_problem(entries)
+    if problem:
+        raise InvalidSettingError(name, f"{DISCORD_ID_LIST_EXPECTATION}, but {problem}")
+
+    return entries
+
+
+def find_discord_id_list_problem(entries: tuple[str, ...]) -> str | None:
+    for index, entry in enumerate(entries):
+        position = index + 1
+
+        if not entry:
+            return f"entry {position} is empty"
+
+        if not DISCORD_ID_PATTERN.fullmatch(entry):
+            return f"entry {position} ({entry!r}) is not one"
+
+        if entry in entries[:index]:
+            return f"entry {position} repeats {entry}"
+
+    return None
 
 
 def require_url(name: str) -> str:

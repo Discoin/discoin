@@ -10,7 +10,7 @@ function ownerBlockListThatNeverAnswers(): BlockListApi {
   const unanswered = () => new Promise<never>(() => undefined);
 
   return {
-    level: "currency",
+    level: "bot",
     list: vi.fn(),
     block: vi.fn(unanswered),
     previewBlock: vi.fn(unanswered),
@@ -22,7 +22,7 @@ test("every field and choice is locked while the review is loading", async () =>
   render(
     <BlockUserForm
       blockList={ownerBlockListThatNeverAnswers()}
-      scope="from OAT"
+      scope="from Harvest bot"
       onBlocked={vi.fn()}
       onCancel={vi.fn()}
     />,

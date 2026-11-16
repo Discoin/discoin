@@ -9,15 +9,12 @@ from psycopg.rows import DictRow
 from app.core.errors import ApiError
 from app.currencies.curve import give_back, max_amount
 from app.currencies.queries import record_history
-from app.transactions.exchange import ExchangeSide, checked_payout, lock_exchange_sides
+from app.transactions.exchange import ExchangeSide, checked_payout, lock_exchange_sides, unknown_currency
+from app.transactions.queries import returning_with_currencies
 from app.webhooks.delivery import enqueue_webhook
 
 DAILY_CAP_WINDOW = timedelta(hours=24)
 COUNTED_TOWARD_CAP = ("Pending", "Completed")
-
-TRANSACTION_RETURNING = """
-    RETURNING id, user_id, from_currency_id, to_currency_id, amount, payout, status, submitted_at, handled_at
-"""
 
 
 def create_transaction(
@@ -25,7 +22,7 @@ def create_transaction(
 ) -> dict[str, Any]:
     sides = lock_exchange_sides(db, {source_id, target_id})
     if target_id not in sides:
-        raise ApiError(404, "No currency with that ID.", "toCurrencyId")
+        raise unknown_currency("toCurrencyId")
 
     source, target = sides[source_id], sides[target_id]
     paid_out = checked_payout(amount, source, target)
@@ -36,11 +33,12 @@ def create_transaction(
     set_reserve(db, target.id, target.curve.reserve - paid_out, now)
 
     created = db.execute(
-        """
-        INSERT INTO transactions (id, user_id, from_currency_id, to_currency_id, amount, payout, status, submitted_at)
-        VALUES (%s, %s, %s, %s, %s, %s, 'Pending', %s)
-        """
-        + TRANSACTION_RETURNING,
+        returning_with_currencies(
+            """
+            INSERT INTO transactions (id, user_id, from_currency_id, to_currency_id, amount, payout, status, submitted_at)
+            VALUES (%s, %s, %s, %s, %s, %s, 'Pending', %s)
+            """
+        ),
         (uuid7(), user_id, source.id, target.id, amount, paid_out, now),
     ).fetchone()
     enqueue_webhook(db, created, "created", now)
@@ -60,7 +58,7 @@ def undo_transaction(
     set_reserve(db, source.id, source.curve.reserve - returned, now)
 
     return db.execute(
-        "UPDATE transactions SET status = %s, handled_at = %s, block_id = %s WHERE id = %s" + TRANSACTION_RETURNING,
+        returning_with_currencies("UPDATE transactions SET status = %s, handled_at = %s, block_id = %s WHERE id = %s"),
         (status, now, block_id, transaction["id"]),
     ).fetchone()
 
@@ -74,10 +72,14 @@ def require_not_blocked(db: Connection[DictRow], user_id: str, source: ExchangeS
     row = db.execute(
         """
         SELECT 1 FROM blocks
-        WHERE user_id = %s AND unblocked_at IS NULL AND (currency_id IS NULL OR currency_id = ANY(%s))
+        WHERE user_id = %(user_id)s AND unblocked_at IS NULL AND (
+            (currency_id IS NULL AND bot_id IS NULL)
+            OR currency_id = ANY(%(currency_ids)s)
+            OR bot_id IN (SELECT bot_id FROM currencies WHERE id = ANY(%(currency_ids)s))
+        )
         LIMIT 1
         """,
-        (user_id, [source.id, target.id]),
+        {"user_id": user_id, "currency_ids": [source.id, target.id]},
     ).fetchone()
     if row is not None:
         raise ApiError(403, "This user is blocked from converting these currencies.", "userId")

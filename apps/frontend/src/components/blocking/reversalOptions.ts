@@ -9,7 +9,10 @@ export const WINDOW_OPTIONS: RadioOption<ReverseWindow>[] = [
 ];
 
 export const DIRECTION_OPTIONS: RadioOption<ReverseDirection>[] = [
-  { value: "incoming", label: "Incoming (into your currency)" },
-  { value: "outgoing", label: "Outgoing (out of your currency)" },
+  { value: "incoming", label: "Incoming (into any of your bot's currencies)" },
+  {
+    value: "outgoing",
+    label: "Outgoing (out of any of your bot's currencies)",
+  },
   { value: "both", label: "Both" },
 ];

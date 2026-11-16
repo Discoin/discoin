@@ -1,15 +1,4 @@
 {
-  "extraKnownMarketplaces": {
-    "nx-claude-plugins": {
-      "source": {
-        "source": "github",
-        "repo": "nrwl/nx-ai-agents-config"
-      }
-    }
-  },
-  "enabledPlugins": {
-    "nx@nx-claude-plugins": true
-  },
   "permissions": {
     "deny": [
       "Read(**/.env)",
@@ -26,19 +15,30 @@
       "Read(**/secrets/**)"
     ]
   },
+  "enabledPlugins": {
+    "nx@nx-claude-plugins": true
+},
+  "extraKnownMarketplaces": {
+    "nx-claude-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "nrwl/nx-ai-agents-config"
+      }
+    }
+  },
   "sandbox": {
-    "filesystem": {
-      "allowRead": [
-        "/tmp/.nx",
-        "~/.nx"
-      ],
-      "allowWrite": [
+    "network": {
+      "allowUnixSockets": [
         "/tmp/.nx",
         "~/.nx"
       ]
     },
-    "network": {
-      "allowUnixSockets": [
+    "filesystem": {
+      "allowWrite": [
+        "/tmp/.nx",
+        "~/.nx"
+      ],
+      "allowRead": [
         "/tmp/.nx",
         "~/.nx"
       ]

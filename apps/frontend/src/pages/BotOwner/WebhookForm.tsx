@@ -5,6 +5,7 @@ import { Button } from "../../components/shared/Button.jsx";
 import { Field } from "../../components/shared/Field.jsx";
 import { useAction } from "../../lib/useAction.js";
 import { ShowOnceSecret, type ShowOnceCopy } from "./ShowOnceSecret.jsx";
+import { useUnsavedChanges } from "./unsavedChanges.js";
 
 const SECRET_COPY: ShowOnceCopy = {
   label: "Webhook secret",
@@ -19,27 +20,32 @@ const SECRET_COPY: ShowOnceCopy = {
     "The old secret stops signing right away. Your bot rejects new webhooks until it has the new secret.",
   confirmLabel: "Regenerate secret",
   cancelLabel: "Keep current secret",
+  dismissLabel: "I've copied the secret",
 };
 
 interface WebhookFormProps {
-  currencyId: string;
+  botId: string;
   initialUrl: string | null;
   hasSecret: boolean;
 }
 
 export function WebhookForm({
-  currencyId,
+  botId,
   initialUrl,
   hasSecret,
 }: WebhookFormProps) {
   const [savedUrl, setSavedUrl] = useState(initialUrl);
   const [url, setUrl] = useState(initialUrl ?? "");
   const action = useAction();
+  useUnsavedChanges("Webhook URL", {
+    hasChanges: url.trim() !== (savedUrl ?? ""),
+    isSaving: action.state.status === "pending",
+  });
 
   function save(event: Event) {
     event.preventDefault();
     void action.run(async () => {
-      await api.setWebhookUrl(currencyId, url);
+      await api.setWebhookUrl(botId, url);
       setSavedUrl(url.trim());
 
       return "Webhook saved. New transactions go to this URL.";
@@ -48,7 +54,7 @@ export function WebhookForm({
 
   function sendTest() {
     void action.run(async () => {
-      const status = await api.testWebhook(currencyId);
+      const status = await api.testWebhook(botId);
 
       return `Test sent. Your webhook answered ${status}.`;
     });
@@ -56,7 +62,7 @@ export function WebhookForm({
 
   function remove() {
     void action.run(async () => {
-      await api.removeWebhookUrl(currencyId);
+      await api.removeWebhookUrl(botId);
       setSavedUrl(null);
       setUrl("");
 
@@ -68,7 +74,7 @@ export function WebhookForm({
     <div class="form-stack">
       <ShowOnceSecret
         exists={hasSecret}
-        issue={() => api.generateWebhookSecret(currencyId)}
+        issue={() => api.generateWebhookSecret(botId)}
         copy={SECRET_COPY}
       />
       <form class="form-stack" onSubmit={save} noValidate>
@@ -77,7 +83,7 @@ export function WebhookForm({
           type="url"
           value={url}
           placeholder="https://bot.example.com/discoin"
-          hint="Discoin sends a signed request here for every transaction into your currency."
+          hint="Discoin sends a signed request here for every transaction into any of this bot's currencies."
           error={action.fieldError("webhookUrl")}
           onInput={(event) => setUrl(event.currentTarget.value)}
         />

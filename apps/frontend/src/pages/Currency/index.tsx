@@ -11,7 +11,6 @@ import { Panel } from "../../components/layout/Panel.jsx";
 import { PriceChange } from "../../components/currency/PriceChange.jsx";
 import { StatList } from "../../components/shared/StatList.jsx";
 import { TransactionTable } from "../../components/transactions/TransactionTable.jsx";
-import { activeCurrencies } from "../../lib/currencies.js";
 import { currencyValue } from "../../lib/exchange.js";
 import { formatValue } from "../../lib/format.js";
 import { usePageTitle } from "../../lib/usePageTitle.js";
@@ -42,7 +41,7 @@ async function loadCurrencyPage(
 ): Promise<CurrencyPageData> {
   const currency = await api.getCurrency(abbreviation);
   const [currencies, history, transactions] = await Promise.all([
-    api.listAllCurrencies(),
+    api.listCurrencies(),
     api.getReserveHistory(currency.id, MONTH_DAYS),
     api.listCurrencyTransactions(currency.id),
   ]);
@@ -180,7 +179,7 @@ function CurrencyView({
         <div class="quote__calculator">
           {currency.active ? (
             <TradeableCalculator
-              currencies={activeCurrencies(currencies)}
+              currencies={currencies}
               initialFromId={currency.id}
             />
           ) : (
@@ -202,7 +201,6 @@ function CurrencyView({
           <TransactionTable
             caption={`Recent ${abbreviation} trades`}
             transactions={transactions}
-            currencies={currencies}
           />
         )}
       </Panel>

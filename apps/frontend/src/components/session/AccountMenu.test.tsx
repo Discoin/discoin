@@ -15,7 +15,7 @@ const USER: CurrentUser = {
   avatarUrl: AVATAR_URL,
   defaultAvatarUrl: DEFAULT_AVATAR_URL,
   isAdmin: false,
-  ownedCurrencyIds: [],
+  ownedBots: [],
 };
 
 vi.mock("../../api/client.js", () => ({

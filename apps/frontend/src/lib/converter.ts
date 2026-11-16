@@ -34,7 +34,7 @@ export function parseAmount(text: string): number {
 
 const CENTS = 100;
 
-function hasAtMostCents(amount: number): boolean {
+export function hasAtMostCents(amount: number): boolean {
   return Number.isInteger(Number((amount * CENTS).toFixed(6)));
 }
 

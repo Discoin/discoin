@@ -1,13 +1,12 @@
 import type { ComponentChildren } from "preact";
 import { TableFrame } from "../shared/TableFrame.jsx";
-import type { Currency, Transaction } from "../../api/types.js";
-import { findCurrency } from "../../lib/currencies.js";
+import type { CurrencyLabel, Transaction } from "../../api/types.js";
 import { formatAmount, formatTimestamp } from "../../lib/format.js";
 import { StatusPill } from "./StatusPill.jsx";
 import { TransactionId } from "./TransactionId.jsx";
 import "../shared/DataTable.scss";
 
-export interface TransactionAction {
+export interface TransactionColumn {
   header: string;
   render: (transaction: Transaction) => ComponentChildren;
 }
@@ -15,15 +14,19 @@ export interface TransactionAction {
 interface TransactionTableProps {
   caption: string;
   transactions: Transaction[];
-  currencies: Currency[];
-  action?: TransactionAction;
+  extraColumns?: TransactionColumn[];
+}
+
+function currencyLabelText(label: CurrencyLabel): string {
+  if (!label.removed) return label.abbreviation;
+
+  return `${label.abbreviation} (${label.name}, removed)`;
 }
 
 export function TransactionTable({
   caption,
   transactions,
-  currencies,
-  action,
+  extraColumns = [],
 }: TransactionTableProps) {
   return (
     <TableFrame label={caption}>
@@ -41,39 +44,42 @@ export function TransactionTable({
             <th scope="col">Status</th>
             <th scope="col">Submitted</th>
             <th scope="col">Handled</th>
-            {action && <th scope="col">{action.header}</th>}
+            {extraColumns.map((column) => (
+              <th key={column.header} scope="col">
+                {column.header}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {transactions.map((transaction) => {
-            const from = findCurrency(currencies, transaction.fromCurrencyId);
-            const to = findCurrency(currencies, transaction.toCurrencyId);
-
-            return (
-              <tr key={transaction.id}>
-                <td>
-                  <TransactionId id={transaction.id} />
-                </td>
-                <td class="data-table__number">
-                  {formatAmount(transaction.amount)} {from.abbreviation}
-                </td>
-                <td class="data-table__number">
-                  {formatAmount(transaction.payout)} {to.abbreviation}
-                </td>
-                <td>
-                  <StatusPill status={transaction.status} />
-                </td>
-                <td class="data-table__number">
-                  {formatTimestamp(transaction.submittedAt)}
-                </td>
-                <td class="data-table__number">
-                  {transaction.handledAt !== null &&
-                    formatTimestamp(transaction.handledAt)}
-                </td>
-                {action && <td>{action.render(transaction)}</td>}
-              </tr>
-            );
-          })}
+          {transactions.map((transaction) => (
+            <tr key={transaction.id}>
+              <td>
+                <TransactionId id={transaction.id} />
+              </td>
+              <td class="data-table__number">
+                {formatAmount(transaction.amount)}{" "}
+                {currencyLabelText(transaction.fromCurrency)}
+              </td>
+              <td class="data-table__number">
+                {formatAmount(transaction.payout)}{" "}
+                {currencyLabelText(transaction.toCurrency)}
+              </td>
+              <td>
+                <StatusPill status={transaction.status} />
+              </td>
+              <td class="data-table__number">
+                {formatTimestamp(transaction.submittedAt)}
+              </td>
+              <td class="data-table__number">
+                {transaction.handledAt !== null &&
+                  formatTimestamp(transaction.handledAt)}
+              </td>
+              {extraColumns.map((column) => (
+                <td key={column.header}>{column.render(transaction)}</td>
+              ))}
+            </tr>
+          ))}
         </tbody>
       </table>
     </TableFrame>
