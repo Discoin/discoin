@@ -44,6 +44,40 @@ export interface PendingTransaction extends Transaction {
   userId: string;
 }
 
+export type BlockState = "active" | "lifted" | "merged";
+
+export interface BotLabel {
+  name: string;
+  removed: boolean;
+}
+
+export interface NoBlockCause {
+  kind: "none";
+}
+
+export interface SiteWideBlockCause {
+  kind: "global";
+  state: BlockState;
+  reason?: string;
+}
+
+export interface BotBlockCause {
+  kind: "bot";
+  bot: BotLabel;
+  state: BlockState;
+  reason?: string;
+}
+
+export type TransactionCause =
+  | NoBlockCause
+  | SiteWideBlockCause
+  | BotBlockCause;
+
+export interface TransactionDetail extends Transaction {
+  userId?: string;
+  cause?: TransactionCause;
+}
+
 export interface ReservePoint {
   at: string;
   reserve: number;

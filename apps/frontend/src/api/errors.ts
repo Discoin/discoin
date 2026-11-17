@@ -1,3 +1,5 @@
+export const TRANSACTION_ID_FIELD = "transaction_id";
+
 export class ApiError extends Error {
   readonly status: number;
   readonly field: string | undefined;

@@ -1,4 +1,3 @@
-import { createMockApi } from "../mocks/api.js";
 import { createHttpApi } from "./http.js";
 import type {
   AdminBot,
@@ -24,6 +23,7 @@ import type {
   ReverseRequest,
   SavedCurrency,
   Transaction,
+  TransactionDetail,
 } from "./types.js";
 
 export interface BlockListApi {
@@ -51,6 +51,7 @@ export interface DiscoinApi {
     days: HistoryDays,
   ): Promise<ReservePoint[]>;
   listRecentTransactions(): Promise<Transaction[]>;
+  getTransaction(transactionId: string): Promise<TransactionDetail>;
   getQuote(
     fromCurrencyId: string,
     toCurrencyId: string,
@@ -100,19 +101,18 @@ export interface DiscoinApi {
 
 export const LOGIN_PATH = "/api/auth/discord/login";
 
-const API_BUILDERS: Record<string, () => DiscoinApi> = {
-  http: createHttpApi,
-  mock: createMockApi,
-};
+async function createApi(): Promise<DiscoinApi> {
+  if (import.meta.env.VITE_API_MODE === "http") return createHttpApi();
 
-function createApi(mode: string): DiscoinApi {
-  if (!(mode in API_BUILDERS)) {
-    throw new Error(
-      `Build with --mode http or --mode mock to pick the API. Got "${mode}".`,
-    );
+  if (import.meta.env.VITE_API_MODE === "mock") {
+    const { createMockApi } = await import("../mocks/api.js");
+
+    return createMockApi();
   }
 
-  return API_BUILDERS[mode]();
+  throw new Error(
+    `Build with --mode http or --mode mock to pick the API. Got "${import.meta.env.VITE_API_MODE}".`,
+  );
 }
 
-export const api: DiscoinApi = createApi(import.meta.env.VITE_API_MODE);
+export const api: DiscoinApi = await createApi();

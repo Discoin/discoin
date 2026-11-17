@@ -18,6 +18,8 @@ import { Dashboard } from "./pages/Dashboard/index.jsx";
 import { MyTransactions } from "./pages/MyTransactions/index.jsx";
 import { NotFound } from "./pages/_404.jsx";
 import { Privacy } from "./pages/Privacy/index.jsx";
+import { TransactionPage } from "./pages/Transaction/index.jsx";
+import { focusMainWhenFocusIsLost } from "./lib/focus.js";
 import "@fontsource-variable/instrument-sans/standard.css";
 import "@fontsource-variable/martian-mono/standard.css";
 import "./style.scss";
@@ -33,10 +35,11 @@ export function App() {
         </a>
         <Header />
         <main id="main" tabIndex={-1}>
-          <Router>
+          <Router onRouteChange={focusMainWhenFocusIsLost}>
             <Route path="/" component={Dashboard} />
             <Route path="/currency/:abbreviation" component={CurrencyPage} />
             <Route path="/transactions" component={MyTransactions} />
+            <Route path="/transactions/:id" component={TransactionPage} />
             <Route path="/owner" component={BotOwner} />
             <Route path="/admin" component={Admin} />
             <Route path="/privacy" component={Privacy} />

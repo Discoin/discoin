@@ -18,6 +18,7 @@ import type {
   ReverseRequest,
   SavedCurrency,
   Transaction,
+  TransactionDetail,
 } from "./types.js";
 
 export const API_BASE = "/api";
@@ -169,6 +170,11 @@ export function createHttpApi(): DiscoinApi {
       ),
     listRecentTransactions: () =>
       request<Transaction[]>("GET", "/transactions"),
+    getTransaction: (transactionId) =>
+      request<TransactionDetail>(
+        "GET",
+        `/transactions/${segment(transactionId)}`,
+      ),
     getQuote: async (fromCurrencyId, toCurrencyId, amount) => {
       const query = new URLSearchParams({
         fromCurrencyId,

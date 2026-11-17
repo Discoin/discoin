@@ -1,0 +1,57 @@
+@use "../../styles/breakpoints";
+
+.transaction-page__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  font-size: var(--text-3xl);
+  font-weight: 700;
+  font-stretch: 85%;
+  letter-spacing: -0.01em;
+}
+
+.transaction-facts {
+  display: grid;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background-color: var(--surface-raised);
+}
+
+.transaction-facts__row {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) minmax(0, 1fr);
+  gap: var(--space-1) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+
+  & + & {
+    border-top: 1px solid var(--line);
+  }
+
+  dt {
+    color: var(--ink-muted);
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+
+  dd {
+    min-width: 0;
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  p {
+    margin: 0;
+  }
+
+  p + p {
+    margin-top: var(--space-1);
+  }
+}
+
+@media (max-width: breakpoints.$phone-max-width) {
+  .transaction-facts__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

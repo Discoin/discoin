@@ -24,6 +24,18 @@ import {
 const PAGES = [
   { path: "/", title: "Discoin" },
   { path: "/transactions", title: "My transactions | Discoin" },
+  {
+    path: "/transactions/01989c4e-2f10-7a3b-9c41-5d7e0b8a2f61",
+    title: "Transaction 8a2f61 | Discoin",
+  },
+  {
+    path: "/transactions/01998f2a-4b70-7d19-8e36-c5a07b2d1f68",
+    title: "Transaction 2d1f68 | Discoin",
+  },
+  {
+    path: "/transactions/019a0000-0000-7000-8000-000000000000",
+    title: "Page not found | Discoin",
+  },
   { path: "/owner", title: "Bot owner | Discoin" },
   { path: "/admin", title: "Admin | Discoin" },
   { path: "/currency/OAT", title: "Oats (OAT) | Discoin" },

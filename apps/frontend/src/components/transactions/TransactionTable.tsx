@@ -1,7 +1,8 @@
 import type { ComponentChildren } from "preact";
 import { TableFrame } from "../shared/TableFrame.jsx";
-import type { CurrencyLabel, Transaction } from "../../api/types.js";
+import type { Transaction } from "../../api/types.js";
 import { formatAmount, formatTimestamp } from "../../lib/format.js";
+import { currencyLabelText } from "./currencyLabel.js";
 import { StatusPill } from "./StatusPill.jsx";
 import { TransactionId } from "./TransactionId.jsx";
 import "../shared/DataTable.scss";
@@ -15,12 +16,6 @@ interface TransactionTableProps {
   caption: string;
   transactions: Transaction[];
   extraColumns?: TransactionColumn[];
-}
-
-function currencyLabelText(label: CurrencyLabel): string {
-  if (!label.removed) return label.abbreviation;
-
-  return `${label.abbreviation} (${label.name}, removed)`;
 }
 
 export function TransactionTable({

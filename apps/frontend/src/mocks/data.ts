@@ -1,6 +1,7 @@
 import type {
   AdminUser,
   BlockedUser,
+  BlockState,
   Currency,
   CurrencyName,
   ReservePoint,
@@ -141,6 +142,12 @@ const [OATS, PEBBLES, SCRAP, GEMS, TICKETS] = sampleCurrencies;
 const CURRENT_USER_ID = "412358906715234305";
 const TRADER_ID = "530917284650193847";
 const OTHER_TRADER_ID = "829304715620394857";
+const OAT_BOT_BLOCKED_ID = "293847561029384756";
+const GLOBALLY_BLOCKED_ID = "587261093847562019";
+const ROCK_BOT_LIFTED_ID = "374619203847561029";
+const OAT_BOT_CANCEL_ID = "01989c4e-2f10-7a3b-9c41-5d7e0b8a2f61";
+const GLOBAL_CANCEL_ID = "01987a31-8c52-7e04-a1f3-6b9d2c4e7a08";
+const LIFTED_CANCEL_ID = "019860d7-4a19-7c85-b2e6-0f3a9d1c5b74";
 
 export interface RemovedCurrency extends CurrencyName {
   reserve: number;
@@ -293,6 +300,36 @@ const TRANSACTION_SEEDS: TransactionSeed[] = [
     submittedAt: "2026-08-20T16:40:12Z",
     handledAt: "2026-08-20T16:40:15Z",
   },
+  {
+    id: OAT_BOT_CANCEL_ID,
+    senderId: OAT_BOT_BLOCKED_ID,
+    from: PEBBLES,
+    to: OATS,
+    amount: 4_000,
+    status: "Cancelled",
+    submittedAt: "2026-08-10T11:20:31Z",
+    handledAt: "2026-11-02T14:22:10Z",
+  },
+  {
+    id: GLOBAL_CANCEL_ID,
+    senderId: GLOBALLY_BLOCKED_ID,
+    from: GEMS,
+    to: TICKETS,
+    amount: 25,
+    status: "Cancelled",
+    submittedAt: "2026-08-05T08:02:47Z",
+    handledAt: "2026-11-09T19:03:32Z",
+  },
+  {
+    id: LIFTED_CANCEL_ID,
+    senderId: ROCK_BOT_LIFTED_ID,
+    from: PEBBLES,
+    to: OATS,
+    amount: 7_500,
+    status: "Cancelled",
+    submittedAt: "2026-07-28T15:44:09Z",
+    handledAt: "2026-10-12T10:31:00Z",
+  },
 ];
 
 export const sampleTransactions: TransactionRecord[] =
@@ -416,6 +453,50 @@ export const sampleGlobalBlocks: BlockedUser[] = [
     level: "global",
   },
 ];
+
+export interface MockBlockRecord {
+  id: string;
+  userId: string;
+  botId: string | null;
+  reason: string;
+  state: BlockState;
+}
+
+const OAT_BOT_BLOCK: MockBlockRecord = {
+  id: "oat-bot-block",
+  userId: OAT_BOT_BLOCKED_ID,
+  botId: OAT_BOT.id,
+  reason: "Farmed oats with an alt account.",
+  state: "active",
+};
+
+const GLOBAL_BLOCK: MockBlockRecord = {
+  id: "global-block",
+  userId: GLOBALLY_BLOCKED_ID,
+  botId: null,
+  reason: "Exploited a payout bug in several bots.",
+  state: "active",
+};
+
+const LIFTED_ROCK_BOT_BLOCK: MockBlockRecord = {
+  id: "lifted-rock-bot-block",
+  userId: ROCK_BOT_LIFTED_ID,
+  botId: ROCK_BOT.id,
+  reason: "Spammed trades from a bot farm.",
+  state: "lifted",
+};
+
+export const sampleBlockRecords: MockBlockRecord[] = [
+  OAT_BOT_BLOCK,
+  GLOBAL_BLOCK,
+  LIFTED_ROCK_BOT_BLOCK,
+];
+
+export const sampleTransactionBlocks: Record<string, string> = {
+  [OAT_BOT_CANCEL_ID]: OAT_BOT_BLOCK.id,
+  [GLOBAL_CANCEL_ID]: GLOBAL_BLOCK.id,
+  [LIFTED_CANCEL_ID]: LIFTED_ROCK_BOT_BLOCK.id,
+};
 
 export const sampleAdmins: AdminUser[] = [
   sampleCurrentUser,

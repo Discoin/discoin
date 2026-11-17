@@ -13,7 +13,7 @@ from app.owners.access import BotOwnership
 from app.transactions.ledger import undo_transaction
 from app.transactions.locking import UNLOCKED, LockPlan, TransactionFinder, lock_currencies_first
 from app.transactions.models import Transaction
-from app.transactions.queries import CURRENCY_JOINS, TRANSACTION_COLUMNS
+from app.transactions.queries import CURRENCY_JOINS, TRANSACTION_COLUMNS_WITH_USER
 from app.webhooks.delivery import ADMINS, Trigger, enqueue_webhook, owner_of
 
 ReverseWindow = Literal["24h", "7d", "30d", "all"]
@@ -83,7 +83,12 @@ class TransactionSearch:
             ORDER BY t.submitted_at DESC, t.id DESC
             {lock}
             """
-        ).format(columns=sql.SQL(TRANSACTION_COLUMNS), joins=sql.SQL(CURRENCY_JOINS), involves=self.involves, lock=lock)
+        ).format(
+            columns=sql.SQL(TRANSACTION_COLUMNS_WITH_USER),
+            joins=sql.SQL(CURRENCY_JOINS),
+            involves=self.involves,
+            lock=lock,
+        )
 
         return db.execute(
             query, {"user_id": self.user_id, "status": self.status, "since": self.since, "bot_id": self.bot_id}

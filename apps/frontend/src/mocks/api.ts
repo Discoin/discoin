@@ -1,5 +1,5 @@
 import type { BlockListApi, DiscoinApi } from "../api/client.js";
-import { ApiError } from "../api/errors.js";
+import { ApiError, TRANSACTION_ID_FIELD } from "../api/errors.js";
 import type {
   AdminBot,
   AdminCurrency,
@@ -7,6 +7,7 @@ import type {
   BlockedUser,
   BlockLevel,
   BotDetails,
+  BotName,
   BotSettings,
   BotWithCurrencies,
   Currency,
@@ -32,21 +33,24 @@ import {
   startingReserve,
 } from "../lib/exchange.js";
 import { formatAmount } from "../lib/format.js";
+import { parseTransactionId } from "../lib/transactionId.js";
 import {
+  type MockBlockRecord,
   type MockBot,
   type RemovedCurrency,
   sampleAdmins,
+  sampleBlockRecords,
   sampleBotBlocks,
   sampleBotIds,
   sampleBots,
   sampleCurrencies,
   sampleCurrencyBlocks,
-  sampleCurrentUser,
   sampleDailyCaps,
   sampleGlobalBlocks,
   sampleMultipliers,
   sampleRemovedCurrencies,
   sampleReserveHistories,
+  sampleTransactionBlocks,
   sampleTransactionSenders,
   sampleTransactions,
   sampleWeeklyMedians,
@@ -65,6 +69,14 @@ import {
   selectReversible,
   type TransactionFilter,
 } from "./reversals.js";
+import {
+  publicTransaction,
+  type CausingBlock,
+  type TransactionViewer,
+  type ViewedTransaction,
+  viewTransaction,
+} from "./transactionView.js";
+import { mockViewerId } from "./viewer.js";
 
 export const LATENCY_MS = 300;
 const DAY_MS = 86_400_000;
@@ -102,6 +114,9 @@ interface MockState {
   dailyCaps: Record<string, number | null>;
   transactions: TransactionRecord[];
   transactionSenders: Record<string, string>;
+  blocks: MockBlockRecord[];
+  transactionBlocks: Record<string, string>;
+  removedBots: BotName[];
   botBlocks: Record<string, BlockedUser[]>;
   currencyBlocks: Record<string, BlockedUser[]>;
   globalBlocks: BlockedUser[];
@@ -133,6 +148,9 @@ function sampleState(): MockState {
     dailyCaps: sampleDailyCaps,
     transactions: sampleTransactions,
     transactionSenders: sampleTransactionSenders,
+    blocks: sampleBlockRecords,
+    transactionBlocks: sampleTransactionBlocks,
+    removedBots: [],
     botBlocks: sampleBotBlocks,
     currencyBlocks: sampleCurrencyBlocks,
     globalBlocks: sampleGlobalBlocks,
@@ -349,9 +367,12 @@ interface BlockStore {
   readInherited: () => BlockedUser[];
   findReversible: (userId: string, reverse: ReverseRequest) => Transaction[];
   findCancellable: (userId: string) => TransactionRecord[];
+  record: (blocked: BlockedUser) => string;
+  lift: (userId: string) => void;
   undo: (
     transactions: TransactionRecord[],
     status: TransactionStatus,
+    blockId: string,
   ) => Transaction[];
 }
 
@@ -392,8 +413,9 @@ function createBlockList(store: BlockStore): BlockListApi {
     block: (userId, reason, reverse) =>
       respond(() => {
         const { blocked, toReverse } = plan(userId, reason, reverse);
-        const reversed = store.undo(toReverse, "Reversed");
-        store.undo(store.findCancellable(blocked.userId), "Cancelled");
+        const blockId = store.record(blocked);
+        const reversed = store.undo(toReverse, "Reversed", blockId);
+        store.undo(store.findCancellable(blocked.userId), "Cancelled", blockId);
         write([blocked, ...read()]);
 
         return { blocked, reversed };
@@ -405,12 +427,14 @@ function createBlockList(store: BlockStore): BlockListApi {
         if (!isListed(read(), userId)) throw notFound("blocked user");
 
         write(read().filter((user) => user.userId !== userId));
+        store.lift(userId);
       }),
   };
 }
 
 export function createMockApi(): DiscoinApi {
   const state = initialState();
+  const viewerId = mockViewerId();
 
   function currency(id: string): Currency {
     const found = state.currencies.find((candidate) => candidate.id === id);
@@ -447,7 +471,7 @@ export function createMockApi(): DiscoinApi {
   }
 
   function requireOwnerOf(found: MockBot, subject: string): MockBot {
-    if (found.ownerId !== sampleCurrentUser.userId) {
+    if (found.ownerId !== viewerId) {
       throw new ApiError(403, `You don't own that ${subject}.`);
     }
 
@@ -510,9 +534,7 @@ export function createMockApi(): DiscoinApi {
   }
 
   function currentUsersBots(): MockBot[] {
-    return byName(state.bots).filter(
-      (found) => found.ownerId === sampleCurrentUser.userId,
-    );
+    return byName(state.bots).filter((found) => found.ownerId === viewerId);
   }
 
   function currenciesOf(botId: string): Currency[] {
@@ -546,11 +568,7 @@ export function createMockApi(): DiscoinApi {
   }
 
   function labeled(record: TransactionRecord): Transaction {
-    return {
-      ...record,
-      fromCurrency: labelOf(record.fromCurrencyId),
-      toCurrency: labelOf(record.toCurrencyId),
-    };
+    return publicTransaction(record, labelOf);
   }
 
   function labeledWhere(involves: TransactionFilter): Transaction[] {
@@ -737,6 +755,19 @@ export function createMockApi(): DiscoinApi {
     );
   }
 
+  function undoForBlock(
+    transactions: TransactionRecord[],
+    status: TransactionStatus,
+    blockId: string,
+  ): Transaction[] {
+    const undone = undoAll(transactions, status);
+    for (const transaction of undone) {
+      state.transactionBlocks[transaction.id] = blockId;
+    }
+
+    return undone;
+  }
+
   function senderOf(transaction: TransactionRecord): string {
     return lookup(state.transactionSenders, transaction.id, "transaction");
   }
@@ -825,10 +856,14 @@ export function createMockApi(): DiscoinApi {
     return payout;
   }
 
+  function viewerAsAdmin(): AdminUser | undefined {
+    return state.admins.find((admin) => admin.userId === viewerId);
+  }
+
   function currentUser(): CurrentUser | null {
     if (!state.loggedIn) return null;
 
-    const { userId, username } = sampleCurrentUser;
+    const admin = viewerAsAdmin();
     const ownedBots = currentUsersBots().map((found) => ({
       id: found.id,
       name: found.name,
@@ -836,13 +871,121 @@ export function createMockApi(): DiscoinApi {
     }));
 
     return {
-      userId,
-      username,
+      userId: viewerId,
+      username: admin === undefined ? null : admin.username,
       avatarUrl: SAMPLE_AVATAR,
       defaultAvatarUrl: SAMPLE_AVATAR,
-      isAdmin: true,
+      isAdmin: admin !== undefined,
       ownedBots,
     };
+  }
+
+  function currentViewer(): TransactionViewer | null {
+    if (!state.loggedIn) return null;
+
+    return {
+      userId: viewerId,
+      isAdmin: viewerAsAdmin() !== undefined,
+      ownsALiveBot: currentUsersBots().length > 0,
+    };
+  }
+
+  function checkedTransactionId(value: string): string {
+    const id = parseTransactionId(value);
+    if (id === null) {
+      throw new ApiError(
+        400,
+        `${TRANSACTION_ID_FIELD} is not valid.`,
+        TRANSACTION_ID_FIELD,
+      );
+    }
+
+    return id;
+  }
+
+  function transactionRecord(transactionId: string): TransactionRecord {
+    const id = checkedTransactionId(transactionId);
+    const found = state.transactions.find((candidate) => candidate.id === id);
+    if (found === undefined) throw notFound("transaction");
+
+    return found;
+  }
+
+  function liveOwnerIdsOf(currencyId: string): string[] {
+    const live = state.currencies.some((found) => found.id === currencyId);
+    const botId = live ? botIdOf(currencyId) : null;
+    const liveBot = state.bots.find((found) => found.id === botId);
+
+    return liveBot === undefined ? [] : [liveBot.ownerId];
+  }
+
+  function blockingBotOf(
+    botId: string | null,
+  ): Pick<CausingBlock, "bot" | "liveOwnerId"> {
+    if (botId === null) return { bot: null, liveOwnerId: null };
+
+    const live = state.bots.find((found) => found.id === botId);
+    if (live !== undefined) {
+      return {
+        bot: { name: live.name, removed: false },
+        liveOwnerId: live.ownerId,
+      };
+    }
+
+    const removed = state.removedBots.find((found) => found.id === botId);
+    if (removed === undefined) {
+      throw new Error(`A block names an unknown bot "${botId}"`);
+    }
+
+    return { bot: { name: removed.name, removed: true }, liveOwnerId: null };
+  }
+
+  function causingBlockOf(transactionId: string): CausingBlock | null {
+    if (!(transactionId in state.transactionBlocks)) return null;
+
+    const blockId = state.transactionBlocks[transactionId];
+    const block = state.blocks.find((found) => found.id === blockId);
+    if (block === undefined) {
+      throw new Error(`A transaction names an unknown block "${blockId}"`);
+    }
+
+    return {
+      ...blockingBotOf(block.botId),
+      reason: block.reason,
+      state: block.state,
+    };
+  }
+
+  function viewedTransaction(record: TransactionRecord): ViewedTransaction {
+    return {
+      transaction: labeled(record),
+      senderId: senderOf(record),
+      sideOwnerIds: [record.fromCurrencyId, record.toCurrencyId].flatMap(
+        liveOwnerIdsOf,
+      ),
+      causingBlock: causingBlockOf(record.id),
+    };
+  }
+
+  function recordBlock(blocked: BlockedUser, botId: string | null): string {
+    const id = crypto.randomUUID();
+    const { userId, reason } = blocked;
+    state.blocks = [
+      ...state.blocks,
+      { id, userId, botId, reason, state: "active" },
+    ];
+
+    return id;
+  }
+
+  function liftBlock(userId: string, botId: string | null): void {
+    state.blocks = state.blocks.map((block) =>
+      block.userId === userId &&
+      block.botId === botId &&
+      block.state === "active"
+        ? { ...block, state: "lifted" }
+        : block,
+    );
   }
 
   function setActive(currencyId: string, active: boolean): void {
@@ -939,11 +1082,16 @@ export function createMockApi(): DiscoinApi {
         state.loggedIn = false;
       }),
     listRecentTransactions: () => respond(() => labeledWhere(() => true)),
+    getTransaction: (transactionId) =>
+      respond(() =>
+        viewTransaction(
+          viewedTransaction(transactionRecord(transactionId)),
+          currentViewer(),
+        ),
+      ),
     listMyTransactions: () =>
       respond(() =>
-        labeledWhere(
-          (transaction) => senderOf(transaction) === sampleCurrentUser.userId,
-        ),
+        labeledWhere((transaction) => senderOf(transaction) === viewerId),
       ),
 
     listOwnedBots: () =>
@@ -1094,7 +1242,9 @@ export function createMockApi(): DiscoinApi {
           ),
         findCancellable: (userId) =>
           pendingOf(userId, involvesAny(currencyIdsOf(botId))),
-        undo: undoAll,
+        record: (blocked) => recordBlock(blocked, botId),
+        lift: (userId) => liftBlock(userId, botId),
+        undo: undoForBlock,
       }),
 
     listAdminCurrencies: () =>
@@ -1216,10 +1366,11 @@ export function createMockApi(): DiscoinApi {
       }),
     removeBot: (botId) =>
       respond(() => {
-        bot(botId);
+        const { name } = bot(botId);
         atomically(() => {
           retireCurrencies(currencyIdsOf(botId));
           state.bots = state.bots.filter((candidate) => candidate.id !== botId);
+          state.removedBots = [...state.removedBots, { id: botId, name }];
         });
       }),
     globalBlocks: createBlockList({
@@ -1232,7 +1383,9 @@ export function createMockApi(): DiscoinApi {
       findReversible: (userId, reverse) =>
         reversibleBy(userId, reverse, adminReversalFilter(reverse)),
       findCancellable: (userId) => pendingOf(userId, () => true),
-      undo: undoAll,
+      record: (blocked) => recordBlock(blocked, null),
+      lift: (userId) => liftBlock(userId, null),
+      undo: undoForBlock,
     }),
     listAdmins: () => respond(() => state.admins),
     grantAdmin: (userId) =>
@@ -1249,7 +1402,7 @@ export function createMockApi(): DiscoinApi {
       }),
     removeAdmin: (userId) =>
       respond(() => {
-        if (userId === sampleCurrentUser.userId) {
+        if (userId === viewerId) {
           throw new ApiError(
             400,
             "You can't remove your own admin access. Ask another admin.",

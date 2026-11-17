@@ -51,7 +51,45 @@ test("a live currency shows its abbreviation only", () => {
 });
 
 test("a removed currency is plain text, not a link", () => {
-  rows();
+  const [old] = rows();
+  const received = within(old).getByText("10.00 OAT (Oats, removed)");
 
-  expect(screen.queryAllByRole("link")).toEqual([]);
+  expect(received.querySelector("a")).toBeNull();
+  expect(received.closest("a")).toBeNull();
+});
+
+test("each transaction ID links to its page, named with the full ID", () => {
+  const [old] = rows();
+  const link = within(old).getByRole("link");
+
+  expect(link.getAttribute("href")).toBe(`/transactions/${OLD_OATS_TRADE.id}`);
+  expect(link.querySelector("[aria-hidden='true']")?.textContent).toBe(
+    "a9b6d4",
+  );
+  expect(
+    within(old).getByRole("link", {
+      name: `Transaction ${OLD_OATS_TRADE.id}`,
+    }),
+  ).toBe(link);
+});
+
+test("only the ID cell links, so a row action stays a separate control", () => {
+  render(
+    <TransactionTable
+      caption="Pending"
+      transactions={[OLD_OATS_TRADE]}
+      extraColumns={[
+        {
+          header: "Webhook",
+          render: () => <button type="button">Resend</button>,
+        },
+      ]}
+    />,
+  );
+  const [row] = screen.getAllByRole("row").slice(1);
+
+  expect(within(row).getAllByRole("link")).toHaveLength(1);
+  expect(
+    within(row).getByRole("button", { name: "Resend" }).closest("a"),
+  ).toBeNull();
 });

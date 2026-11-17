@@ -6,20 +6,21 @@ from fastapi import Depends, Query
 from psycopg import Connection
 from psycopg.rows import DictRow
 
-from app.core.errors import ApiError
+from app.core.errors import ApiError, not_found
 from app.currencies.queries import require_currency_exists
 from app.transactions.models import BotTransaction, Transaction
 
 DEFAULT_PAGE_SIZE = 50
 LARGEST_PAGE_SIZE = 100
 
-TRANSACTION_COLUMNS = """
-    t.id, t.user_id, t.from_currency_id, t.to_currency_id, t.amount, t.payout, t.status, t.submitted_at, t.handled_at,
+PUBLIC_TRANSACTION_COLUMNS = """
+    t.id, t.from_currency_id, t.to_currency_id, t.amount, t.payout, t.status, t.submitted_at, t.handled_at,
     json_build_object('abbreviation', f.abbreviation, 'name', f.name, 'removed', f.removed_at IS NOT NULL)
         AS from_currency,
     json_build_object('abbreviation', o.abbreviation, 'name', o.name, 'removed', o.removed_at IS NOT NULL)
         AS to_currency
 """
+TRANSACTION_COLUMNS_WITH_USER = f"t.user_id, {PUBLIC_TRANSACTION_COLUMNS}"
 CURRENCY_JOINS = """
     JOIN currencies f ON f.id = t.from_currency_id
     JOIN currencies o ON o.id = t.to_currency_id
@@ -27,7 +28,7 @@ CURRENCY_JOINS = """
 
 
 def returning_with_currencies(statement: str) -> str:
-    return f"WITH t AS ({statement} RETURNING *) SELECT {TRANSACTION_COLUMNS} FROM t {CURRENCY_JOINS}"
+    return f"WITH t AS ({statement} RETURNING *) SELECT {TRANSACTION_COLUMNS_WITH_USER} FROM t {CURRENCY_JOINS}"
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,7 @@ def fetch_page(db: Connection[DictRow], condition: str, parameters: dict[str, An
     require_cursor_exists(db, page.before)
     rows = db.execute(
         f"""
-        SELECT {TRANSACTION_COLUMNS} FROM transactions t {CURRENCY_JOINS}
+        SELECT {PUBLIC_TRANSACTION_COLUMNS} FROM transactions t {CURRENCY_JOINS}
         WHERE {condition}
             AND (
                 %(before)s::uuid IS NULL
@@ -82,6 +83,16 @@ def fetch_page(db: Connection[DictRow], condition: str, parameters: dict[str, An
     ).fetchall()
 
     return [Transaction.model_validate(row) for row in rows]
+
+
+def find_transaction(db: Connection[DictRow], transaction_id: UUID) -> Transaction:
+    row = db.execute(
+        f"SELECT {PUBLIC_TRANSACTION_COLUMNS} FROM transactions t {CURRENCY_JOINS} WHERE t.id = %s", (transaction_id,)
+    ).fetchone()
+    if row is None:
+        raise not_found("transaction")
+
+    return Transaction.model_validate(row)
 
 
 def require_cursor_exists(db: Connection[DictRow], before: UUID | None) -> None:
@@ -104,7 +115,7 @@ def list_pending_into_bot(db: Connection[DictRow], bot_id: UUID) -> list[BotTran
 def list_pending_where(db: Connection[DictRow], condition: str, value: UUID) -> list[BotTransaction]:
     rows = db.execute(
         f"""
-        SELECT {TRANSACTION_COLUMNS} FROM transactions t {CURRENCY_JOINS}
+        SELECT {TRANSACTION_COLUMNS_WITH_USER} FROM transactions t {CURRENCY_JOINS}
         WHERE {condition} AND t.status = 'Pending'
         ORDER BY t.submitted_at, t.id
         """,

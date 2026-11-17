@@ -27,6 +27,7 @@ from app.core.secret_box import SecretBox
 from app.currencies import routes as currency_routes
 from app.me import routes as me_routes
 from app.owners import routes as owner_routes
+from app.transactions import detail as transaction_detail_routes
 from app.transactions import routes as transaction_routes
 from app.webhooks.delivery import WebhookSender
 from app.webhooks.public_transport import PublicAddressTransport
@@ -49,6 +50,7 @@ DASHBOARD_ROUTES = (
     owner_routes,
     blocking_routes,
     admin_routes,
+    transaction_detail_routes,
 )
 
 NextHandler = Callable[[Request], Awaitable[Response]]

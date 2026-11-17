@@ -1,5 +1,15 @@
 .transaction-id {
-  font-size: var(--text-xs);
+  display: inline-flex;
+  align-items: center;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
   color: var(--ink-muted);
+  font-size: var(--text-xs);
   white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+
+  &:hover {
+    color: var(--ink);
+  }
 }

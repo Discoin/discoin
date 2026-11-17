@@ -57,6 +57,25 @@ def logged_in_user(
     if session is None:
         raise ApiError(401, "Log in with Discord first.")
 
+    user = session_user(db, session, now)
+    if user is None:
+        raise ApiError(401, "Your login has expired. Log in with Discord again.")
+
+    return user
+
+
+def viewing_user(
+    db: Database,
+    now: Now,
+    session: Annotated[str | None, Cookie(alias=SESSION_COOKIE, include_in_schema=False)] = None,
+) -> User | None:
+    if session is None:
+        return None
+
+    return session_user(db, session, now)
+
+
+def session_user(db: Connection[DictRow], session: str, now: datetime) -> User | None:
     row = db.execute(
         """
         SELECT users.id, users.username, users.avatar_hash, users.is_admin FROM sessions
@@ -66,7 +85,7 @@ def logged_in_user(
         (hash_secret(session), now),
     ).fetchone()
     if row is None:
-        raise ApiError(401, "Your login has expired. Log in with Discord again.")
+        return None
 
     return User(id=row["id"], username=row["username"], avatar_hash=row["avatar_hash"], is_admin=row["is_admin"])
 
@@ -79,4 +98,5 @@ def admin_user(user: Annotated[User, Depends(logged_in_user)]) -> User:
 
 
 LoggedInUser = Annotated[User, Depends(logged_in_user)]
+ViewingUser = Annotated[User | None, Depends(viewing_user)]
 AdminUser = Annotated[User, Depends(admin_user)]

@@ -10,6 +10,7 @@ import {
   LOST_CONNECTION_ON_RENAME_KEY,
   STALLED_RENAMES_KEY,
 } from "../src/mocks/ownerScenarios.js";
+import { MOCK_VIEWER_KEY } from "../src/mocks/viewer.js";
 
 export const WCAG_22_AA_TAGS = [
   "wcag2a",
@@ -60,6 +61,18 @@ export async function openOwnerReversalReview(page: Page): Promise<void> {
   await dialog.getByLabel("Both", { exact: true }).check();
   await reviewReversal(dialog);
   await expect(reversalTable(page)).toBeVisible();
+}
+
+export async function startAsMockViewer(
+  page: Page,
+  userId: string,
+): Promise<void> {
+  await page.addInitScript(
+    ([key, viewer]) => {
+      sessionStorage.setItem(key, viewer);
+    },
+    [MOCK_VIEWER_KEY, userId],
+  );
 }
 
 async function startWithMockSetting(page: Page, key: string): Promise<void> {

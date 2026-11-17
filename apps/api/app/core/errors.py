@@ -5,6 +5,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
+from app.core.caching import is_per_viewer, mark_per_viewer
+
 VALIDATION_MESSAGES = {
     "missing": "{field} is required.",
     "json_invalid": "The request body is not valid JSON.",
@@ -61,8 +63,12 @@ def field_name(location: tuple[str | int, ...]) -> str | None:
 
 def handle_unexpected_error(request: Request, error: Exception) -> JSONResponse:
     logger.error("unhandled error", exc_info=error, extra={"method": request.method, "path": request.url.path})
+    response = error_response(500, "Something went wrong on our side. Try again in a moment.", None)
 
-    return error_response(500, "Something went wrong on our side. Try again in a moment.", None)
+    if is_per_viewer(request.scope):
+        mark_per_viewer(response.headers)
+
+    return response
 
 
 def install_error_handlers(app: FastAPI) -> None:

@@ -208,6 +208,7 @@ def test_unexpected_errors_use_the_error_shape(api_environment: None, connection
         "message": "Something went wrong on our side. Try again in a moment.",
         "field": None,
     }
+    assert "cache-control" not in response.headers
 
 
 def test_webhook_transport_reports_unresolvable_hosts() -> None:

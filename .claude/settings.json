@@ -16,8 +16,9 @@
     ]
   },
   "enabledPlugins": {
-    "nx@nx-claude-plugins": true
-},
+    "nx@nx-claude-plugins": true,
+    "ponytail@ponytail": true
+  },
   "extraKnownMarketplaces": {
     "nx-claude-plugins": {
       "source": {

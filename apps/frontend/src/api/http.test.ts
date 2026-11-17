@@ -54,6 +54,17 @@ describe("requests", () => {
     expect(lastCall(fetchMock).url).toBe("/api/currencies/a%2Fb");
   });
 
+  test("a transaction is read by its encoded ID with the session cookie", async () => {
+    const fetchMock = stubFetch(jsonResponse(200, {}));
+
+    await api.getTransaction("a/b");
+
+    const { url, init } = lastCall(fetchMock);
+    expect(url).toBe("/api/transactions/a%2Fb");
+    expect(init.method).toBe("GET");
+    expect(init.credentials).toBe("same-origin");
+  });
+
   test("history asks for the window in days", async () => {
     const fetchMock = stubFetch(jsonResponse(200, []));
 

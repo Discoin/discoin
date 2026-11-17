@@ -30,10 +30,12 @@ export function ReversalReview({
       </p>
       {transactions.length > 0 && (
         <>
-          <TransactionTable
-            caption="Transactions to reverse"
-            transactions={transactions}
-          />
+          <div class="reversal-review__transactions" inert={pending}>
+            <TransactionTable
+              caption="Transactions to reverse"
+              transactions={transactions}
+            />
+          </div>
           <Notice tone="warning" title="Bots take the coins back">
             <p>
               Discoin tells each receiving bot to take the coins back from this
