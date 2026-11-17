@@ -16,33 +16,30 @@ def test_floor2_rounds_down_to_cents() -> None:
     assert floor2(Decimal(5)) == Decimal("5.00")
 
 
-def test_value_is_worth_over_reserve() -> None:
-    assert value(POOR) == Decimal(1)
-    assert value(RICH) == Decimal("0.1")
+def test_value_is_worth_over_reserve_and_rate_is_the_value_ratio() -> None:
+    assert (value(POOR), value(RICH)) == (Decimal(1), Decimal("0.1"))
+    assert (rate(RICH, POOR), rate(POOR, RICH)) == (Decimal("0.1"), Decimal(10))
 
 
-def test_rate_is_value_ratio() -> None:
-    assert rate(RICH, POOR) == Decimal("0.1")
-    assert rate(POOR, RICH) == Decimal(10)
+EVEN = CurveSide(reserve=Decimal(300))
+REMAINING = [Decimal("0.01"), Decimal(50), Decimal("1234.56")]
 
 
-def test_payout_example_from_plan() -> None:
-    assert payout(Decimal(1_000), RICH, POOR) == Decimal("99.90")
-
-
-def test_payout_of_tiny_amount_can_be_zero() -> None:
-    assert payout(Decimal("0.01"), RICH, POOR) == Decimal("0.00")
+@pytest.mark.parametrize(
+    ("amount", "source", "target", "expected"),
+    [
+        (Decimal(1_000), RICH, POOR, Decimal("99.90")),
+        (Decimal("0.01"), RICH, POOR, Decimal("0.00")),
+        (Decimal(300), EVEN, EVEN, Decimal("150.00")),
+    ],
+    ids=["plan example", "tiny amount pays nothing", "exact cent"],
+)
+def test_payout_follows_the_curve(amount: Decimal, source: CurveSide, target: CurveSide, expected: Decimal) -> None:
+    assert payout(amount, source, target) == expected
 
 
 def test_payout_stays_below_target_reserve() -> None:
     assert payout(Decimal(1_000_000_000), POOR, RICH) < RICH.reserve
-
-
-def test_payout_is_exact_when_result_lands_on_a_cent() -> None:
-    source = CurveSide(reserve=Decimal(300))
-    target = CurveSide(reserve=Decimal(300))
-
-    assert payout(Decimal(300), source, target) == Decimal("150.00")
 
 
 @pytest.mark.parametrize("amount", [Decimal(0), Decimal(-1)])
@@ -84,16 +81,22 @@ def test_max_amount_is_unbounded_when_remaining_reaches_reserve(remaining: Decim
     assert max_amount(remaining, RICH, POOR) is None
 
 
-@pytest.mark.parametrize("remaining", [Decimal("0.01"), Decimal(50), Decimal("1234.56"), Decimal(99_999)])
-def test_max_amount_payout_fits_remaining(remaining: Decimal) -> None:
-    most = max_amount(remaining, RICH, POOR)
-
-    assert payout(most, RICH, POOR) <= remaining
-    assert payout(most + Decimal("0.01"), RICH, POOR) >= floor2(remaining - Decimal("0.01"))
-
-
 STRONG = CurveSide(reserve=Decimal(1_000_000), worth=Decimal(200_000))
 WEAK = CurveSide(reserve=Decimal(100_000), worth=Decimal(50_000))
+
+
+@pytest.mark.parametrize(
+    ("source", "target", "remaining"),
+    [
+        *[(RICH, POOR, remaining) for remaining in [*REMAINING, Decimal(99_999)]],
+        *[(STRONG, WEAK, remaining) for remaining in [*REMAINING, Decimal(99_000)]],
+    ],
+)
+def test_max_amount_payout_fits_remaining(source: CurveSide, target: CurveSide, remaining: Decimal) -> None:
+    most = max_amount(remaining, source, target)
+
+    assert payout(most, source, target) <= remaining
+    assert payout(most + Decimal("0.01"), source, target) >= floor2(remaining - Decimal("0.01"))
 
 
 def test_payout_with_unequal_worth_uses_the_power_curve() -> None:
@@ -119,14 +122,6 @@ def test_give_back_with_unequal_worth_inverts_the_exponent() -> None:
     returned = give_back(paid_out, source_after, target_after)
 
     assert Decimal(990) < returned <= Decimal(1_000)
-
-
-@pytest.mark.parametrize("remaining", [Decimal("0.01"), Decimal(50), Decimal("1234.56"), Decimal(99_000)])
-def test_max_amount_with_unequal_worth_fits_remaining(remaining: Decimal) -> None:
-    most = max_amount(remaining, STRONG, WEAK)
-
-    assert payout(most, STRONG, WEAK) <= remaining
-    assert payout(most + Decimal("0.01"), STRONG, WEAK) >= floor2(remaining - Decimal("0.01"))
 
 
 def test_payout_is_exact_at_the_largest_stored_reserve() -> None:

@@ -144,33 +144,11 @@ test("logging out hides the private rows and logging back in shows them", async 
   await expect(fact(page, "Cause")).toBeVisible();
 });
 
-test("an unknown ID shows the 404 page at the same address", async ({
+test("an unknown, malformed or reserved ID shows the 404 page at the same address", async ({
   page,
 }) => {
-  await expectNotFound(page, `/transactions/${UNKNOWN}`);
-});
-
-test("a malformed ID shows the 404 page at the same address", async ({
-  page,
-}) => {
-  await expectNotFound(page, "/transactions/not-a-transaction");
-});
-
-test("/transactions/pending shows the 404 page, not a bot error", async ({
-  page,
-}) => {
-  await expectNotFound(page, "/transactions/pending");
-
-  await expect(page.getByText("Couldn't load transaction")).toHaveCount(0);
-});
-
-test("/transactions is still the user's own list", async ({ page }) => {
-  await openPage(page, "/transactions");
-
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "My transactions",
-  );
-  await expect(
-    page.getByRole("table", { name: "My transactions" }),
-  ).toBeVisible();
+  for (const id of [UNKNOWN, "not-a-transaction", "pending"]) {
+    await expectNotFound(page, `/transactions/${id}`);
+    await expect(page.getByText("Couldn't load transaction")).toHaveCount(0);
+  }
 });

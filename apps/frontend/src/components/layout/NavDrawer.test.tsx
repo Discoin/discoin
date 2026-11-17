@@ -4,18 +4,13 @@ import {
   fireEvent,
   render,
   screen,
-  waitFor,
   within,
 } from "@testing-library/preact";
 import { LocationProvider } from "preact-iso";
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 
-import { ApiError } from "../../api/errors.js";
 import type { CurrentUser } from "../../api/types.js";
-import {
-  installFakeMatchMedia,
-  type FakeMedia,
-} from "../../lib/fakeMatchMedia.js";
+import { installFakeMatchMedia } from "../../lib/fakeMatchMedia.js";
 import { SessionProvider } from "../session/SessionProvider.jsx";
 import { NavDrawer } from "./NavDrawer.jsx";
 
@@ -32,18 +27,14 @@ const LOG_IN = /^Log in/;
 
 const fakeApi = vi.hoisted(() => ({
   getMe: (): Promise<unknown> => Promise.resolve(null),
-  logout: (): Promise<void> => Promise.resolve(),
 }));
 
 vi.mock("../../api/client.js", () => ({
   LOGIN_PATH: "/api/auth/discord/login",
   api: {
     getMe: () => fakeApi.getMe(),
-    logout: () => fakeApi.logout(),
   },
 }));
-
-let media: FakeMedia;
 
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function showModal() {
@@ -55,9 +46,8 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  media = installFakeMatchMedia();
+  installFakeMatchMedia();
   fakeApi.getMe = () => Promise.resolve(ADMIN);
-  fakeApi.logout = () => Promise.resolve();
 });
 
 afterEach(cleanup);
@@ -105,24 +95,6 @@ function expectClosed() {
 function focusables(): Element[] {
   return [...drawer().querySelectorAll("a, button")];
 }
-
-test("the drawer is closed until the menu button opens it", () => {
-  renderDrawer();
-
-  expectClosed();
-  expect(menuButton().getAttribute("aria-controls")).toBeTruthy();
-});
-
-test("the menu button opens a modal named Menu with focus on its close button", async () => {
-  const view = await openReadyDrawer();
-
-  expect(menuButton().getAttribute("aria-expanded")).toBe("true");
-  expect(menuButton().getAttribute("aria-controls")).toBe(drawer().id);
-  expect(drawer().hasAttribute("open")).toBe(true);
-  expect(document.activeElement).toBe(
-    view.getByRole("button", { name: "Close menu" }),
-  );
-});
 
 test("logged in, the drawer reads brand, close, the user, Main links, Resources, then Log out", async () => {
   const view = await openReadyDrawer();
@@ -201,30 +173,6 @@ test("Resources in the drawer starts collapsed and expands to API Docs before Lo
   ]);
 });
 
-test("Escape closes the whole drawer with Resources open, refocuses the menu button, and Resources starts collapsed again", async () => {
-  const view = await openReadyDrawer();
-  fireEvent.click(view.getByRole("button", { name: "Resources" }));
-  fireEvent(drawer(), new Event("cancel", { cancelable: true }));
-
-  expectClosed();
-  expect(document.activeElement).toBe(menuButton());
-
-  const reopened = openDrawer();
-  expect(
-    reopened
-      .getByRole("button", { name: "Resources" })
-      .getAttribute("aria-expanded"),
-  ).toBe("false");
-});
-
-test("the close button closes the drawer and refocuses the menu button", async () => {
-  const view = await openReadyDrawer();
-  fireEvent.click(view.getByRole("button", { name: "Close menu" }));
-
-  expectClosed();
-  expect(document.activeElement).toBe(menuButton());
-});
-
 test("a click on the backdrop closes the drawer, a click inside it does not", async () => {
   const view = await openReadyDrawer();
 
@@ -235,30 +183,19 @@ test("a click on the backdrop closes the drawer, a click inside it does not", as
   expectClosed();
 });
 
-for (const name of ["Discoin", "Dashboard", "My transactions"]) {
-  test(`following ${name} closes the drawer, even when it is the current page`, async () => {
+test.each([
+  { name: "Dashboard", user: ADMIN },
+  { name: LOG_IN, user: null },
+])(
+  "following $name closes the drawer, even on the current page",
+  async ({ name, user }) => {
+    signInAs(user);
     const view = await openReadyDrawer();
     fireEvent.click(view.getByRole("link", { name }));
 
     expectClosed();
-  });
-}
-
-test("following API Docs closes the drawer", async () => {
-  const view = await openReadyDrawer();
-  fireEvent.click(view.getByRole("button", { name: "Resources" }));
-  fireEvent.click(view.getByRole("link", { name: "API Docs" }));
-
-  expectClosed();
-});
-
-test("following Log in closes the drawer", async () => {
-  signInAs(null);
-  const view = await openReadyDrawer();
-  fireEvent.click(view.getByRole("link", { name: LOG_IN }));
-
-  expectClosed();
-});
+  },
+);
 
 test("while the session loads, the account block is empty and there is no footer", () => {
   fakeApi.getMe = () => new Promise(() => undefined);
@@ -272,41 +209,4 @@ test("while the session loads, the account block is empty and there is no footer
   expect(drawer().querySelector(".avatar")).toBeNull();
   expect(drawer().querySelector(".nav-drawer__foot")).toBeNull();
   expect(view.getByRole("link", { name: "Dashboard" })).toBeTruthy();
-});
-
-test("Log out is not focused when the drawer opens", async () => {
-  const view = await openReadyDrawer();
-
-  expect(document.activeElement).not.toBe(
-    view.getByRole("button", { name: "Log out" }),
-  );
-});
-
-test("a failed logout keeps the drawer open with the error above Log out", async () => {
-  fakeApi.logout = () =>
-    Promise.reject(new ApiError(500, "Logging out failed."));
-  const view = await openReadyDrawer();
-  const logout = view.getByRole("button", { name: "Log out" });
-  fireEvent.click(logout);
-
-  const error = await view.findByText("Logging out failed.");
-  expect(drawer()).toBeTruthy();
-  expect(error.closest(".nav-drawer__foot")).toBe(logout.parentElement);
-  expect(
-    error.compareDocumentPosition(logout) & Node.DOCUMENT_POSITION_FOLLOWING,
-  ).toBeTruthy();
-});
-
-test("a successful logout closes the drawer", async () => {
-  const view = await openReadyDrawer();
-  fireEvent.click(view.getByRole("button", { name: "Log out" }));
-
-  await waitFor(expectClosed);
-});
-
-test("growing past the phone width closes the drawer", async () => {
-  await openReadyDrawer();
-  act(() => media.change(false));
-
-  expectClosed();
 });

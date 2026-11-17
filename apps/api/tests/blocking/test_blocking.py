@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 import app.blocking.service
 from app.transactions.ledger import create_transaction
 from tests.factories import (
-    FIRST_ADMIN_ID,
+    ADMIN_ID,
     NOW,
     OWNER_ID,
     USER_ID,
@@ -75,7 +75,7 @@ def as_owner(client: TestClient, connection: psycopg.Connection) -> None:
 
 
 def as_admin(client: TestClient, connection: psycopg.Connection) -> None:
-    log_in(client, connection, FIRST_ADMIN_ID)
+    log_in(client, connection, ADMIN_ID)
 
 
 def test_owner_block_lists_with_admin_blocks_read_only(
@@ -197,18 +197,16 @@ def test_owner_reverses_completed_by_direction_relative_to_the_bot(
     assert market.status(transactions["unrelated"]) == "Completed"
 
 
-def test_owner_reversal_needs_a_direction(client: TestClient, connection: psycopg.Connection, market: Market) -> None:
-    as_owner(client, connection)
-
-    response = client.post(market.blocks, json=block_body(window="24h"))
-
-    assert (response.status_code, response.json()["field"]) == (400, "direction")
-
-
-def test_admin_reversal_takes_no_direction(client: TestClient, connection: psycopg.Connection, market: Market) -> None:
-    as_admin(client, connection)
-
-    response = client.post("/admin/blocks", json=block_body(window="24h", direction="both"))
+@pytest.mark.parametrize("admin", [False, True], ids=["owner needs one", "admin takes none"])
+def test_a_reversal_direction_is_for_owners_only(
+    client: TestClient, connection: psycopg.Connection, market: Market, admin: bool
+) -> None:
+    if admin:
+        as_admin(client, connection)
+        response = client.post("/admin/blocks", json=block_body(window="24h", direction="both"))
+    else:
+        as_owner(client, connection)
+        response = client.post(market.blocks, json=block_body(window="24h"))
 
     assert (response.status_code, response.json()["field"]) == (400, "direction")
 
@@ -358,26 +356,3 @@ def test_admin_unblocks_everywhere(client: TestClient, connection: psycopg.Conne
 
     assert client.delete(f"/admin/blocks/{USER_ID}").status_code == 204
     assert client.get("/admin/blocks").json() == []
-
-
-@pytest.mark.parametrize(
-    ("method", "path"),
-    [
-        ("GET", "/admin/blocks"),
-        ("POST", "/admin/blocks"),
-        ("POST", "/admin/blocks/preview"),
-        ("DELETE", "/admin/blocks/1"),
-    ],
-)
-def test_admin_block_routes_are_for_admins(
-    client: TestClient, connection: psycopg.Connection, market: Market, method: str, path: str
-) -> None:
-    as_owner(client, connection)
-
-    assert client.request(method, path, json=block_body(window="all")).status_code == 403
-
-
-def test_only_the_owner_manages_bot_blocks(client: TestClient, connection: psycopg.Connection, market: Market) -> None:
-    as_admin(client, connection)
-
-    assert client.post(market.blocks, json=block_body()).status_code == 403

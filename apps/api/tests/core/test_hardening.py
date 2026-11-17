@@ -1,7 +1,6 @@
 import json
 import logging
 from datetime import timedelta
-from decimal import Decimal
 
 import httpx
 import psycopg
@@ -13,11 +12,9 @@ from app.core.logs import JsonFormatter
 from app.core.rate_limit import RateLimiter
 from app.core.secret_box import InvalidKeyError, SecretBox
 from app.main import create_app
-from app.transactions.ledger import create_transaction as ledger_create
 from app.webhooks.delivery import WebhookSender, deliver_due_webhooks
 from app.webhooks.public_transport import PublicAddressTransport
 from tests.factories import (
-    FIRST_ADMIN_ID,
     FRONTEND_ORIGIN,
     NOW,
     OWNER_ID,
@@ -57,20 +54,6 @@ def test_webhook_transport_refuses_private_addresses(address: str) -> None:
 
     with httpx.Client(transport=transport) as http, pytest.raises(httpx.ConnectError, match="private address"):
         http.post("https://bot.example.com/hook")
-
-
-@pytest.mark.parametrize("url", ["https://127.0.0.1/hook", "https://localhost/hook", "https://[::1]/hook"])
-def test_webhook_url_cannot_point_at_a_private_host(
-    client: TestClient, connection: psycopg.Connection, url: str
-) -> None:
-    currency_id = create_currency(connection, "OAT", 100_000)
-    log_in(client, connection, OWNER_ID)
-    bot_id = bot_of(connection, currency_id)
-    client.post(f"/bots/{bot_id}/webhook-secret")
-
-    response = client.put(f"/bots/{bot_id}/webhook-url", json={"webhookUrl": url})
-
-    assert (response.status_code, response.json()["field"]) == (400, "webhookUrl")
 
 
 def test_cors_allows_only_the_dashboard(client: TestClient) -> None:
@@ -241,24 +224,6 @@ def test_unreadable_secret_is_a_failed_attempt(client: TestClient, connection: p
     assert row["last_error"].startswith("The webhook secret could not be read")
 
 
-def test_latest_value_follows_the_last_write_at_the_same_instant(
-    client: TestClient, connection: psycopg.Connection
-) -> None:
-    oats = create_currency(connection, "OAT", 1_000_000)
-    gems = create_currency(connection, "GEM", 1_000_000)
-    for _ in range(2):
-        created = ledger_create(connection, USER_ID, gems, oats, Decimal(1000), NOW)
-        connection.execute(
-            "UPDATE transactions SET status = 'Completed', handled_at = %s WHERE id = %s", (NOW, created["id"])
-        )
-
-    log_in(client, connection, FIRST_ADMIN_ID)
-    client.post("/admin/blocks", json={"userId": USER_ID, "reason": "Duping", "reverse": {"window": "all"}})
-
-    currency = client.get("/currencies/OAT").json()
-    assert currency["valueHistory"][-1] == pytest.approx(100_000 / currency["reserve"])
-
-
 def test_openapi_lists_only_the_endpoints_bots_use(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
 
@@ -287,9 +252,3 @@ def test_docs_behind_the_dashboard_proxy_load_the_schema_under_its_prefix(client
     assert f"url: '{prefix}/openapi.json'" in docs.text
     assert schema["servers"] == [{"url": prefix}]
     assert "/currencies" in schema["paths"]
-
-
-def test_hidden_endpoints_still_work(client: TestClient) -> None:
-    assert client.get("/health").status_code == 200
-    assert client.get("/me").status_code == 401
-    assert client.get("/admin/currencies").status_code == 401

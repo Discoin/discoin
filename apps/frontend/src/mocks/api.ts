@@ -78,7 +78,7 @@ import {
 } from "./transactionView.js";
 import { mockViewerId } from "./viewer.js";
 
-export const LATENCY_MS = 300;
+const LATENCY_MS = 300;
 const DAY_MS = 86_400_000;
 const DISCORD_ID_PATTERN = /^\d{17,20}$/;
 const ABBREVIATION_PATTERN = /^[A-Z]{3,4}$/;

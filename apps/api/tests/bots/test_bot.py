@@ -11,37 +11,20 @@ from app.bots.tokens import issue_api_token
 from app.transactions.ledger import create_transaction
 from tests.factories import (
     NOW,
+    UNKNOWN_ID,
     USER_ID,
     bot_of,
-    create_bot,
     create_botless_currency,
-    create_currency,
     deactivate,
+    remove_currency,
+    reserve_of,
 )
 
 OTHER_USER_ID = "400000000000000004"
-UNKNOWN_ID = UUID("019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21")
-
-
-@pytest.fixture
-def pair(client: TestClient, connection: psycopg.Connection) -> tuple[UUID, UUID]:
-    return create_currency(connection, "RCH", 1_000_000), create_currency(connection, "POR", 100_000)
 
 
 def bot_headers(connection: psycopg.Connection, currency_id: UUID) -> dict[str, str]:
-    return token_headers(connection, bot_of(connection, currency_id))
-
-
-def token_headers(connection: psycopg.Connection, bot_id: UUID) -> dict[str, str]:
-    return {"Authorization": f"Bearer {issue_api_token(connection, bot_id)}"}
-
-
-def reserve_of(connection: psycopg.Connection, currency_id: UUID) -> Decimal:
-    return connection.execute("SELECT reserve FROM currencies WHERE id = %s", (currency_id,)).fetchone()["reserve"]
-
-
-def remove(connection: psycopg.Connection, currency_id: UUID) -> None:
-    connection.execute("UPDATE currencies SET active = false, removed_at = %s WHERE id = %s", (NOW, currency_id))
+    return {"Authorization": f"Bearer {issue_api_token(connection, bot_of(connection, currency_id))}"}
 
 
 def send(
@@ -74,6 +57,8 @@ def test_create_applies_the_curve_and_saves(
     assert created["payout"] == 99.9
     assert created["userId"] == USER_ID
     assert created["status"] == "Pending" and created["handledAt"] is None
+    assert created["fromCurrency"] == {"abbreviation": "RCH", "name": "RCH coin", "removed": False}
+    assert created["toCurrency"] == {"abbreviation": "POR", "name": "POR coin", "removed": False}
     assert reserve_of(connection, rich) == Decimal("1001000.00")
     assert reserve_of(connection, poor) == Decimal("99900.10")
     history = connection.execute("SELECT count(*) AS points FROM currency_history").fetchone()
@@ -100,19 +85,21 @@ def test_create_needs_the_source_currency(
 
 
 @pytest.mark.parametrize("state", ["unknown", "removed"])
-def test_create_rejects_a_source_that_does_not_exist(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID], state: str
+@pytest.mark.parametrize(("side", "field"), [(0, "fromCurrencyId"), (1, "toCurrencyId")])
+def test_create_rejects_a_currency_that_does_not_exist(
+    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID], side: int, field: str, state: str
 ) -> None:
-    rich, poor = pair
-    headers = bot_headers(connection, rich)
-    source = UNKNOWN_ID if state == "unknown" else rich
+    headers = bot_headers(connection, pair[0])
+    sides = list(pair)
 
-    if state == "removed":
-        remove(connection, rich)
+    if state == "unknown":
+        sides[side] = UNKNOWN_ID
+    else:
+        remove_currency(connection, pair[side])
 
-    response = send(client, headers, (source, poor), 10)
+    response = send(client, headers, (sides[0], sides[1]), 10)
 
-    assert (response["http"], response["field"]) == (404, "fromCurrencyId")
+    assert (response["http"], response["field"]) == (404, field)
 
 
 @pytest.mark.parametrize("owner", ["another bot", "no bot"])
@@ -128,38 +115,27 @@ def test_create_rejects_a_source_the_bot_does_not_run(
     assert reserve_of(connection, poor) == Decimal(100_000)
 
 
-def test_pending_needs_a_currency(client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID]) -> None:
-    rich, _ = pair
-
-    response = client.get("/transactions/pending", headers=bot_headers(connection, rich))
-
-    assert (response.status_code, response.json()["field"]) == (400, "currencyId")
-
-
-@pytest.mark.parametrize("state", ["unknown", "removed"])
-def test_pending_rejects_a_currency_that_does_not_exist(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID], state: str
-) -> None:
-    rich, _ = pair
-    headers = bot_headers(connection, rich)
-    currency_id = UNKNOWN_ID if state == "unknown" else rich
-
-    if state == "removed":
-        remove(connection, rich)
-
-    response = pending_into(client, headers, currency_id)
-
-    assert (response["http"], response["body"]["field"]) == (404, "currencyId")
-
-
-def test_pending_rejects_another_bots_currency(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID]
+@pytest.mark.parametrize(
+    ("currency", "status"), [("missing", 400), ("unknown", 404), ("removed", 404), ("another bot's", 403)]
+)
+def test_pending_needs_one_of_the_bots_live_currencies(
+    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID], currency: str, status: int
 ) -> None:
     rich, poor = pair
+    headers = bot_headers(connection, rich)
+    params = {
+        "missing": {},
+        "unknown": {"currencyId": UNKNOWN_ID},
+        "removed": {"currencyId": str(rich)},
+        "another bot's": {"currencyId": str(poor)},
+    }[currency]
 
-    response = pending_into(client, bot_headers(connection, rich), poor)
+    if currency == "removed":
+        remove_currency(connection, rich)
 
-    assert (response["http"], response["body"]["field"]) == (403, "currencyId")
+    response = client.get("/transactions/pending", headers=headers, params=params)
+
+    assert (response.status_code, response.json()["field"]) == (status, "currencyId")
 
 
 def test_a_bot_with_several_currencies_uses_each_of_them(
@@ -180,56 +156,6 @@ def test_a_bot_with_several_currencies_uses_each_of_them(
     assert [row["id"] for row in pending_into(client, headers, gems)["body"]] == [into_gems["id"]]
     completed = client.patch(f"/transactions/{into_gems['id']}", headers=headers, json={"status": "Completed"})
     assert completed.json()["status"] == "Completed"
-
-
-def test_a_bot_without_currencies_can_name_none(client: TestClient, connection: psycopg.Connection) -> None:
-    lonely = create_currency(connection, "OAT", 1_000_000)
-    headers = token_headers(connection, create_bot(connection))
-
-    assert pending_into(client, headers, lonely)["http"] == 403
-
-
-def test_bot_responses_name_both_currencies(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID]
-) -> None:
-    rich, _ = pair
-
-    created = send(client, bot_headers(connection, rich), pair, 10)
-
-    assert created["fromCurrency"] == {"abbreviation": "RCH", "name": "RCH coin", "removed": False}
-    assert created["toCurrency"] == {"abbreviation": "POR", "name": "POR coin", "removed": False}
-
-
-@pytest.mark.parametrize("side", ["source", "target"])
-def test_create_rejects_a_user_blocked_by_either_bot(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID], side: str
-) -> None:
-    rich, poor = pair
-    bot_id = bot_of(connection, rich if side == "source" else poor)
-    connection.execute(
-        "INSERT INTO blocks (user_id, bot_id, reason, blocked_by, blocked_at) VALUES (%s, %s, 'spam', %s, %s)",
-        (USER_ID, bot_id, USER_ID, NOW),
-    )
-
-    response = send(client, bot_headers(connection, rich), pair, 10)
-
-    assert (response["http"], response["field"]) == (403, "userId")
-
-
-def test_a_bot_block_covers_every_currency_of_the_bot(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID]
-) -> None:
-    rich, poor = pair
-    gems = create_botless_currency(connection, "GEM", 1_000_000)
-    connection.execute("UPDATE currencies SET bot_id = %s WHERE id = %s", (bot_of(connection, poor), gems))
-    connection.execute(
-        "INSERT INTO blocks (user_id, bot_id, reason, blocked_by, blocked_at) VALUES (%s, %s, 'spam', %s, %s)",
-        (USER_ID, bot_of(connection, poor), USER_ID, NOW),
-    )
-
-    response = send(client, bot_headers(connection, rich), (rich, gems), 10)
-
-    assert (response["http"], response["field"]) == (403, "userId")
 
 
 def test_regenerated_token_replaces_the_old_one(
@@ -284,16 +210,6 @@ def test_create_rejects_converting_into_itself(
     assert send(client, bot_headers(connection, rich), (rich, rich), 10)["field"] == "toCurrencyId"
 
 
-def test_create_rejects_an_unknown_target(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID]
-) -> None:
-    rich, _ = pair
-
-    response = send(client, bot_headers(connection, rich), (rich, UNKNOWN_ID), 10)
-
-    assert (response["http"], response["field"]) == (404, "toCurrencyId")
-
-
 @pytest.mark.parametrize(("side", "field"), [("source", "fromCurrencyId"), ("target", "toCurrencyId")])
 def test_create_rejects_an_inactive_currency(
     client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID], side: str, field: str
@@ -306,18 +222,41 @@ def test_create_rejects_an_inactive_currency(
     assert (response["http"], response["field"]) == (400, field)
 
 
-@pytest.mark.parametrize("scope", ["global", "source", "target"])
+@pytest.mark.parametrize(
+    ("bot_of_currency", "currency", "target"),
+    [
+        (None, None, "POR"),
+        (None, "RCH", "POR"),
+        (None, "POR", "POR"),
+        ("RCH", None, "POR"),
+        ("POR", None, "POR"),
+        ("POR", None, "GEM"),
+    ],
+    ids=["global", "source currency", "target currency", "source bot", "target bot", "other currency of the bot"],
+)
 def test_create_rejects_a_blocked_user(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID], scope: str
+    client: TestClient,
+    connection: psycopg.Connection,
+    pair: tuple[UUID, UUID],
+    bot_of_currency: str | None,
+    currency: str | None,
+    target: str,
 ) -> None:
     rich, poor = pair
-    currency_id = {"global": None, "source": rich, "target": poor}[scope]
+    gems = create_botless_currency(connection, "GEM", 1_000_000)
+    connection.execute("UPDATE currencies SET bot_id = %s WHERE id = %s", (bot_of(connection, poor), gems))
+    currencies = {"RCH": rich, "POR": poor, "GEM": gems}
+    blocked_bot = None if bot_of_currency is None else bot_of(connection, currencies[bot_of_currency])
+    blocked_currency = None if currency is None else currencies[currency]
     connection.execute(
-        "INSERT INTO blocks (user_id, currency_id, reason, blocked_by, blocked_at) VALUES (%s, %s, 'spam', %s, %s)",
-        (USER_ID, currency_id, USER_ID, NOW),
+        """
+        INSERT INTO blocks (user_id, bot_id, currency_id, reason, blocked_by, blocked_at)
+        VALUES (%s, %s, %s, 'spam', %s, %s)
+        """,
+        (USER_ID, blocked_bot, blocked_currency, USER_ID, NOW),
     )
 
-    response = send(client, bot_headers(connection, rich), pair, 10)
+    response = send(client, bot_headers(connection, rich), (rich, currencies[target]), 10)
 
     assert (response["http"], response["field"]) == (403, "userId")
 

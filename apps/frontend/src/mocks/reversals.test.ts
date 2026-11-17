@@ -54,28 +54,21 @@ async function reserveOf(api: DiscoinApi, currencyId: string) {
 }
 
 describe("admin reversal windows", () => {
-  test("the last 24 hours lists the user's completed trades, newest first", async () => {
-    expect(await adminPreview({ window: "24h" })).toEqual([
-      PEBBLES_INTO_OATS,
-      SCRAP_INTO_TICKETS,
-      OATS_INTO_GEMS,
-    ]);
-  });
+  const RECENT = [PEBBLES_INTO_OATS, SCRAP_INTO_TICKETS, OATS_INTO_GEMS];
 
-  test("30 days leaves out older trades", async () => {
-    expect(await adminPreview({ window: "30d" })).not.toContain(
-      TICKETS_INTO_OATS_IN_SEPTEMBER,
-    );
-  });
-
-  test("all time includes every completed trade", async () => {
-    expect(await adminPreview({ window: "all" })).toEqual([
-      PEBBLES_INTO_OATS,
-      SCRAP_INTO_TICKETS,
-      OATS_INTO_GEMS,
-      TICKETS_INTO_OATS_IN_SEPTEMBER,
-    ]);
-  });
+  test.each([
+    { window: "24h" as const, expected: RECENT },
+    { window: "30d" as const, expected: RECENT },
+    {
+      window: "all" as const,
+      expected: [...RECENT, TICKETS_INTO_OATS_IN_SEPTEMBER],
+    },
+  ])(
+    "$window lists the user's completed trades in it, newest first",
+    async ({ window, expected }) => {
+      expect(await adminPreview({ window })).toEqual(expected);
+    },
+  );
 
   test("an admin block takes no direction", async () => {
     const error = await apiErrorOf(
@@ -91,24 +84,24 @@ describe("admin reversal windows", () => {
 });
 
 describe("owner reversal directions", () => {
-  test("incoming counts trades into the bot's currencies", async () => {
-    expect(
-      await ownerPreview({ window: "all", direction: "incoming" }),
-    ).toEqual([SCRAP_INTO_TICKETS]);
-  });
-
-  test("outgoing counts trades out of the bot's currencies", async () => {
-    expect(
-      await ownerPreview({ window: "all", direction: "outgoing" }),
-    ).toEqual([TICKETS_INTO_OATS_IN_SEPTEMBER]);
-  });
-
-  test("both leaves out trades that never touch the bot's currencies", async () => {
-    expect(await ownerPreview({ window: "all", direction: "both" })).toEqual([
-      SCRAP_INTO_TICKETS,
-      TICKETS_INTO_OATS_IN_SEPTEMBER,
-    ]);
-  });
+  test.each([
+    { direction: "incoming" as const, expected: [SCRAP_INTO_TICKETS] },
+    {
+      direction: "outgoing" as const,
+      expected: [TICKETS_INTO_OATS_IN_SEPTEMBER],
+    },
+    {
+      direction: "both" as const,
+      expected: [SCRAP_INTO_TICKETS, TICKETS_INTO_OATS_IN_SEPTEMBER],
+    },
+  ])(
+    "$direction counts only trades on that side of the bot's currencies",
+    async ({ direction, expected }) => {
+      expect(await ownerPreview({ window: "all", direction })).toEqual(
+        expected,
+      );
+    },
+  );
 
   test("incoming counts trades into any of the bot's currencies", async () => {
     const api = createMockApi();

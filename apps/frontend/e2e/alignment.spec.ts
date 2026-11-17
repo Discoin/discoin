@@ -75,27 +75,22 @@ async function expectSharedBaselines(page: Page, lines = SHARED_LINES) {
 }
 
 for (const width of [DESKTOP_WIDTH, PHONE_WIDTH]) {
-  for (const path of [
-    "/",
-    "/transactions",
-    "/owner",
-    "/admin",
-    "/currency/OAT",
-  ]) {
-    test(`text on one line shares a baseline on ${path} at ${width}px`, async ({
-      page,
-    }) => {
-      await page.setViewportSize({ width, height: 900 });
-      await openPage(page, path);
-      await expectSharedBaselines(page);
-    });
-  }
-
-  test(`text on one line shares a baseline in the reversal review at ${width}px`, async ({
+  test(`text on one line shares a baseline on every page and the reversal review at ${width}px`, async ({
     page,
   }) => {
     await page.setViewportSize({ width, height: 900 });
-    await openPage(page, "/owner");
+
+    for (const path of [
+      "/",
+      "/transactions",
+      "/admin",
+      "/currency/OAT",
+      "/owner",
+    ]) {
+      await openPage(page, path);
+      await expectSharedBaselines(page);
+    }
+
     await openOwnerReversalReview(page);
     await expectSharedBaselines(page);
   });

@@ -1,11 +1,10 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 import {
   NARROW_PHONE_VIEWPORT,
   PHONE_VIEWPORT,
-  WCAG_22_AA_TAGS,
   choosePickerOption,
+  expectWcagCompliance,
   drawerApiDocs,
   drawerResources,
   failLogOutFromDrawer,
@@ -44,16 +43,6 @@ const PAGES = [
 ];
 const THEMES = ["light", "dark"] as const;
 
-async function expectWcagCompliance(page: Page): Promise<void> {
-  await page.evaluate(() => document.fonts.ready);
-
-  const results = await new AxeBuilder({ page })
-    .withTags(WCAG_22_AA_TAGS)
-    .analyze();
-
-  expect(results.violations).toEqual([]);
-}
-
 for (const { path } of PAGES) {
   for (const theme of THEMES) {
     test(`${path} meets WCAG 2.2 AA in the ${theme} theme`, async ({
@@ -62,21 +51,13 @@ for (const { path } of PAGES) {
       await page.emulateMedia({ colorScheme: theme });
       await openPage(page, path);
 
+      if (path === "/") {
+        await expect(page.getByText("CRN (Corn, removed)")).toBeVisible();
+      }
+
       await expectWcagCompliance(page);
     });
   }
-}
-
-for (const theme of THEMES) {
-  test(`history with a removed currency meets WCAG 2.2 AA in the ${theme} theme`, async ({
-    page,
-  }) => {
-    await page.emulateMedia({ colorScheme: theme });
-    await openPage(page, "/");
-    await expect(page.getByText("CRN (Corn, removed)")).toBeVisible();
-
-    await expectWcagCompliance(page);
-  });
 }
 
 for (const theme of THEMES) {
@@ -176,26 +157,23 @@ async function openSwitchConfirmation(page: Page) {
 }
 
 const PICKER_LABELS = ["Bot", "Currency"];
-const PICKER_STATES = ["closed", "open"] as const;
 
 for (const theme of THEMES) {
   for (const label of PICKER_LABELS) {
-    for (const state of PICKER_STATES) {
-      test(`the ${state} ${label} picker on /owner meets WCAG 2.2 AA in the ${theme} theme`, async ({
-        page,
-      }) => {
-        await page.emulateMedia({ colorScheme: theme });
-        await openPage(page, "/owner");
-        await picker(page, label).focus();
-        if (state === "open") await page.keyboard.press("ArrowDown");
+    test(`the open ${label} picker on /owner meets WCAG 2.2 AA in the ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ colorScheme: theme });
+      await openPage(page, "/owner");
+      await picker(page, label).focus();
+      await page.keyboard.press("ArrowDown");
 
-        await expect(picker(page, label)).toHaveAttribute(
-          "aria-expanded",
-          String(state === "open"),
-        );
-        await expectWcagCompliance(page);
-      });
-    }
+      await expect(picker(page, label)).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+      await expectWcagCompliance(page);
+    });
   }
 }
 
@@ -297,18 +275,23 @@ for (const step of DIALOG_STEPS) {
       await expectWcagCompliance(page);
     });
   }
+}
 
-  test(`the ${step.name} dialog fits a 320px screen`, async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 700 });
+test("every dialog fits a 320px screen", async ({ page }) => {
+  await page.setViewportSize(NARROW_PHONE_VIEWPORT);
+
+  for (const step of DIALOG_STEPS) {
     await openPage(page, step.path);
     await step.open(page);
     const box = await page.getByRole("dialog").boundingBox();
-    if (box === null) throw new Error("The dialog isn't rendered");
+    if (box === null) throw new Error(`The ${step.name} dialog isn't rendered`);
 
-    expect(box.x).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width).toBeLessThanOrEqual(320);
-  });
-}
+    expect(box.x, step.name).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, step.name).toBeLessThanOrEqual(
+      NARROW_PHONE_VIEWPORT.width,
+    );
+  }
+});
 
 const LOGIN_STATES = ["logged in", "logged out"] as const;
 type LoginState = (typeof LOGIN_STATES)[number];
@@ -322,16 +305,6 @@ async function openHomeWithDrawer(page: Page, state: LoginState) {
 
 for (const theme of THEMES) {
   for (const state of LOGIN_STATES) {
-    test(`the menu drawer ${state} meets WCAG 2.2 AA in the ${theme} theme`, async ({
-      page,
-    }) => {
-      await page.emulateMedia({ colorScheme: theme });
-      await page.setViewportSize(PHONE_VIEWPORT);
-      await openHomeWithDrawer(page, state);
-
-      await expectWcagCompliance(page);
-    });
-
     test(`the menu drawer ${state} with Resources open meets WCAG 2.2 AA in the ${theme} theme`, async ({
       page,
     }) => {

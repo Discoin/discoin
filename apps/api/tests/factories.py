@@ -10,7 +10,7 @@ from psycopg import Connection
 from app.auth.sessions import SESSION_COOKIE, hash_secret
 from app.currencies.queries import record_history
 
-FIRST_ADMIN_ID = "100000000000000001"
+ADMIN_ID = "100000000000000001"
 SECOND_ADMIN_ID = "100000000000000002"
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
 FRONTEND_URL = "https://discoin.example.com/"
@@ -22,6 +22,7 @@ MULTIPLIER = 4
 FIRST_BOT_DISCORD_ID = 900_000_000_000_000_000
 BOT_NUMBERS = itertools.count(1)
 LOCK_TIMEOUT_MS = 200
+UNKNOWN_ID = "019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"
 
 
 def create_bot(db: Connection, owner_id: str = OWNER_ID) -> UUID:
@@ -72,8 +73,24 @@ def bot_of(db: Connection, currency_id: UUID) -> UUID:
     return db.execute("SELECT bot_id FROM currencies WHERE id = %s", (currency_id,)).fetchone()["bot_id"]
 
 
+def bot_name(db: Connection, bot_id: UUID) -> str:
+    return db.execute("SELECT name FROM bots WHERE id = %s", (bot_id,)).fetchone()["name"]
+
+
 def deactivate(db: Connection, currency_id: UUID) -> None:
     db.execute("UPDATE currencies SET active = false WHERE id = %s", (currency_id,))
+
+
+def remove_currency(db: Connection, currency_id: UUID) -> None:
+    db.execute("UPDATE currencies SET active = false, removed_at = %s WHERE id = %s", (NOW, currency_id))
+
+
+def status_of(db: Connection, transaction_id: UUID) -> str:
+    return db.execute("SELECT status FROM transactions WHERE id = %s", (transaction_id,)).fetchone()["status"]
+
+
+def reserve_of(db: Connection, currency_id: UUID) -> Decimal:
+    return db.execute("SELECT reserve FROM currencies WHERE id = %s", (currency_id,)).fetchone()["reserve"]
 
 
 def create_transaction(

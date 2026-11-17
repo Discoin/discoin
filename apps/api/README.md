@@ -45,8 +45,6 @@ Every setting is required. The API refuses to start when one is missing or malfo
 | `WEBHOOK_SECRET_KEY` | API, worker | 32 random bytes in base64, used to encrypt webhook secrets at rest |
 | `SEED_OWNER_ID` | seed | Discord user ID that owns the sample bots, one per sample currency |
 
-`FIRST_ADMIN_IDS` was called `FIRST_ADMIN_ID` before. The API refuses to start while `FIRST_ADMIN_ID` is set, whatever its value. When deploying this release, rename the line in the production host's own environment file to `FIRST_ADMIN_IDS` and remove the old line in the same step. A single ID is still a valid list.
-
 Make a key with `python -c "import base64, os; print(base64.b64encode(os.urandom(32)).decode())"`.
 
 For tests, start a throwaway database and point `DATABASE_URL` at it:

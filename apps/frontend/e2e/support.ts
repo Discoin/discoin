@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, type Locator, type Page } from "@playwright/test";
 
 import {
@@ -12,13 +13,23 @@ import {
 } from "../src/mocks/ownerScenarios.js";
 import { MOCK_VIEWER_KEY } from "../src/mocks/viewer.js";
 
-export const WCAG_22_AA_TAGS = [
+const WCAG_22_AA_TAGS = [
   "wcag2a",
   "wcag2aa",
   "wcag21a",
   "wcag21aa",
   "wcag22aa",
 ];
+
+export async function expectWcagCompliance(page: Page): Promise<void> {
+  await page.evaluate(() => document.fonts.ready);
+
+  const results = await new AxeBuilder({ page })
+    .withTags(WCAG_22_AA_TAGS)
+    .analyze();
+
+  expect(results.violations).toEqual([]);
+}
 
 const LOADING_PLACEHOLDERS =
   ".loadable__loading:not(.specimen *), .site-header__ticker-note";

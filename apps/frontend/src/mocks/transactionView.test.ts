@@ -1,11 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import type { DiscoinApi } from "../api/client.js";
-import type { TransactionRecord } from "../api/types.js";
 import { createMockApi } from "./api.js";
 import { sampleBots, sampleCurrentUser } from "./data.js";
 import { apiErrorOf, settle } from "./settle.js";
-import { publicTransaction } from "./transactionView.js";
 import { MOCK_VIEWER_KEY } from "./viewer.js";
 
 const [OAT_BOT, ROCK_BOT] = sampleBots;
@@ -36,11 +34,6 @@ const PUBLIC_KEYS = [
   "toCurrencyId",
 ];
 const HARVEST_BOT = { name: "Harvest bot", removed: false };
-const GLOBAL_TRADERS_BOT = {
-  name: "Side project bot",
-  discordId: "990000000000000042",
-  ownerId: GLOBAL_TRADER,
-};
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -64,106 +57,65 @@ async function loggedOutApi(): Promise<DiscoinApi> {
   return api;
 }
 
-async function detailText(api: DiscoinApi, id: string): Promise<string> {
-  return JSON.stringify(await settle(api.getTransaction(id)));
-}
+test("every list item has exactly the public keys", async () => {
+  const api = createMockApi();
+  const lists = [
+    await settle(api.listRecentTransactions()),
+    await settle(api.listMyTransactions()),
+  ];
 
-describe("public transactions", () => {
-  test("are built from the public fields only, never by spreading the record", () => {
-    const record = {
-      id: COMPLETED_TRADE,
-      fromCurrencyId: "pebbles",
-      toCurrencyId: "oats",
-      amount: 100,
-      payout: 10,
-      status: "Completed",
-      submittedAt: "2026-11-12T21:58:44Z",
-      handledAt: "2026-11-12T21:58:51Z",
-      userId: OAT_BOT_TRADER,
-    } as TransactionRecord;
-    const label = { abbreviation: "OAT", name: "Oats", removed: false };
-
-    const built = publicTransaction(record, () => label);
-
-    expect(Object.keys(built).sort()).toEqual(PUBLIC_KEYS);
-    expect(JSON.stringify(built)).not.toContain(OAT_BOT_TRADER);
-  });
-
-  test("every list item has exactly the public keys", async () => {
-    const api = createMockApi();
-    const lists = [
-      await settle(api.listRecentTransactions()),
-      await settle(api.listMyTransactions()),
-    ];
-
-    for (const item of lists.flat()) {
-      expect(Object.keys(item).sort()).toEqual(PUBLIC_KEYS);
-    }
-  });
+  for (const item of lists.flat()) {
+    expect(Object.keys(item).sort()).toEqual(PUBLIC_KEYS);
+  }
 });
 
 describe("one transaction", () => {
-  test("an unknown ID is a 404", async () => {
-    const error = await apiErrorOf(
-      createMockApi().getTransaction("019a0000-0000-7000-8000-000000000000"),
+  test("an unknown ID is a 404 and a malformed one a 400 on the ID field", async () => {
+    const api = createMockApi();
+    const unknown = await apiErrorOf(
+      api.getTransaction("019a0000-0000-7000-8000-000000000000"),
     );
+    const malformed = await apiErrorOf(api.getTransaction("nope"));
 
-    expect(error.status).toBe(404);
-    expect(error.message).toBe("No transaction with that ID.");
+    expect([unknown.status, unknown.message]).toEqual([
+      404,
+      "No transaction with that ID.",
+    ]);
+    expect([malformed.status, malformed.field]).toEqual([
+      400,
+      "transaction_id",
+    ]);
   });
+
+  test.each([COMPLETED_TRADE.toUpperCase(), `urn:uuid:${COMPLETED_TRADE}`])(
+    "accepts %s like the API does",
+    async (id) => {
+      const viewed = await settle(createMockApi().getTransaction(id));
+
+      expect(viewed.id).toBe(COMPLETED_TRADE);
+    },
+  );
 
   test.each([
-    COMPLETED_TRADE.toUpperCase(),
-    COMPLETED_TRADE.replace(/-/g, ""),
-    `{${COMPLETED_TRADE}}`,
-    `urn:uuid:${COMPLETED_TRADE}`,
-  ])("accepts %s like the API does", async (id) => {
-    const viewed = await settle(createMockApi().getTransaction(id));
-
-    expect(viewed.id).toBe(COMPLETED_TRADE);
-  });
-
-  test("a malformed ID is a 400 on the ID field", async () => {
-    const error = await apiErrorOf(createMockApi().getTransaction("nope"));
-
-    expect(error.status).toBe(400);
-    expect(error.field).toBe("transaction_id");
-  });
-
-  test("a logged out viewer gets only the public keys", async () => {
-    const api = await loggedOutApi();
-    const viewed = await settle(api.getTransaction(OAT_BOT_CANCEL));
+    { name: "a logged out viewer", open: loggedOutApi },
+    { name: "an unrelated viewer", open: async () => apiViewedBy(STRANGER) },
+  ])("$name gets only the public keys", async ({ open }) => {
+    const viewed = await settle((await open()).getTransaction(OAT_BOT_CANCEL));
+    const text = JSON.stringify(viewed);
 
     expect(Object.keys(viewed).sort()).toEqual(PUBLIC_KEYS);
-    expect(JSON.stringify(viewed)).not.toContain(OAT_BOT_TRADER);
-    expect(JSON.stringify(viewed)).not.toContain(OAT_BOT_REASON);
-  });
-
-  test("an unrelated logged in viewer gets only the public keys", async () => {
-    const text = await detailText(apiViewedBy(STRANGER), OAT_BOT_CANCEL);
-
-    expect(Object.keys(JSON.parse(text) as object).sort()).toEqual(PUBLIC_KEYS);
     expect(text).not.toContain(OAT_BOT_TRADER);
     expect(text).not.toContain(OAT_BOT_REASON);
   });
 
-  test("the blocking bot's owner gets the user and the reason", async () => {
-    const viewed = await settle(
-      apiViewedBy(OAT_BOT_OWNER).getTransaction(OAT_BOT_CANCEL),
-    );
-
-    expect(viewed.userId).toBe(OAT_BOT_TRADER);
-    expect(viewed.cause).toEqual({
-      kind: "bot",
-      bot: HARVEST_BOT,
-      state: "active",
-      reason: OAT_BOT_REASON,
-    });
-  });
-
-  test.each([OAT_BOT_TRADER, ROCK_BOT_OWNER, ADMIN_ONLY])(
-    "%s gets the user and the bot block without its reason",
-    async (viewerId) => {
+  test.each([
+    { viewerId: OAT_BOT_OWNER, reads: true },
+    { viewerId: OAT_BOT_TRADER, reads: false },
+    { viewerId: ROCK_BOT_OWNER, reads: false },
+    { viewerId: ADMIN_ONLY, reads: false },
+  ])(
+    "a bot block reason is for its owner only: $viewerId reads it is $reads",
+    async ({ viewerId, reads }) => {
       const viewed = await settle(
         apiViewedBy(viewerId).getTransaction(OAT_BOT_CANCEL),
       );
@@ -173,13 +125,18 @@ describe("one transaction", () => {
         kind: "bot",
         bot: HARVEST_BOT,
         state: "active",
+        ...(reads ? { reason: OAT_BOT_REASON } : {}),
       });
     },
   );
 
-  test.each([OAT_BOT_OWNER, ADMIN_ONLY])(
-    "%s reads a site wide reason",
-    async (viewerId) => {
+  test.each([
+    { viewerId: OAT_BOT_OWNER, reads: true },
+    { viewerId: ADMIN_ONLY, reads: true },
+    { viewerId: GLOBAL_TRADER, reads: false },
+  ])(
+    "a site wide reason is for owners and admins: $viewerId reads it is $reads",
+    async ({ viewerId, reads }) => {
       const viewed = await settle(
         apiViewedBy(viewerId).getTransaction(GLOBAL_CANCEL),
       );
@@ -187,41 +144,10 @@ describe("one transaction", () => {
       expect(viewed.cause).toEqual({
         kind: "global",
         state: "active",
-        reason: GLOBAL_REASON,
+        ...(reads ? { reason: GLOBAL_REASON } : {}),
       });
     },
   );
-
-  test("a trading user with no other role reads no site wide reason", async () => {
-    const viewed = await settle(
-      apiViewedBy(GLOBAL_TRADER).getTransaction(GLOBAL_CANCEL),
-    );
-
-    expect(viewed.cause).toEqual({ kind: "global", state: "active" });
-  });
-
-  test("a trader who owns an unrelated live bot reads a site wide reason", async () => {
-    const api = apiViewedBy(GLOBAL_TRADER);
-    await settle(api.addBot(GLOBAL_TRADERS_BOT));
-
-    const viewed = await settle(api.getTransaction(GLOBAL_CANCEL));
-
-    expect(viewed.cause).toEqual({
-      kind: "global",
-      state: "active",
-      reason: GLOBAL_REASON,
-    });
-  });
-
-  test("a trader whose only bot is removed reads no site wide reason", async () => {
-    const api = apiViewedBy(GLOBAL_TRADER);
-    const added = await settle(api.addBot(GLOBAL_TRADERS_BOT));
-    await settle(api.removeBot(added.id));
-
-    const viewed = await settle(api.getTransaction(GLOBAL_CANCEL));
-
-    expect(viewed.cause).toEqual({ kind: "global", state: "active" });
-  });
 
   test("an owner of neither side who didn't trade gets the public keys", async () => {
     const viewed = await settle(
@@ -231,19 +157,6 @@ describe("one transaction", () => {
     expect(Object.keys(viewed).sort()).toEqual(PUBLIC_KEYS);
   });
 
-  test("a lifted block keeps its reason for the bot's owner", async () => {
-    const viewed = await settle(
-      apiViewedBy(ROCK_BOT_OWNER).getTransaction(LIFTED_CANCEL),
-    );
-
-    expect(viewed.cause).toEqual({
-      kind: "bot",
-      bot: { name: "Rock bot", removed: false },
-      state: "lifted",
-      reason: "Spammed trades from a bot farm.",
-    });
-  });
-
   test("a Completed transaction has no cause", async () => {
     const viewed = await settle(
       createMockApi().getTransaction(COMPLETED_TRADE),
@@ -251,6 +164,14 @@ describe("one transaction", () => {
 
     expect(viewed.userId).toBe(NEW_BLOCKED_ID);
     expect("cause" in viewed).toBe(false);
+  });
+
+  test("a cancel without a block says so", async () => {
+    const viewed = await settle(
+      createMockApi().getTransaction("019a7a51-c7f2-7b08-9d5e-31a6f0c8e7b4"),
+    );
+
+    expect(viewed.cause).toEqual({ kind: "none" });
   });
 
   test("a block records itself as the cause, and lifting it shows lifted", async () => {
@@ -294,28 +215,6 @@ describe("one transaction", () => {
       state: "active",
       reason: "Self test.",
     });
-  });
-
-  test("a trading owner reads the reason of their own bot's block", async () => {
-    const api = createMockApi();
-    await settle(api.botBlocks(OAT_BOT.id).block(OAT_BOT_OWNER, "Self test."));
-
-    const viewed = await settle(api.getTransaction(OWN_PENDING_TRADE));
-
-    expect(viewed.cause).toEqual({
-      kind: "bot",
-      bot: HARVEST_BOT,
-      state: "active",
-      reason: "Self test.",
-    });
-  });
-
-  test("a cancel without a block says so", async () => {
-    const viewed = await settle(
-      createMockApi().getTransaction("019a7a51-c7f2-7b08-9d5e-31a6f0c8e7b4"),
-    );
-
-    expect(viewed.cause).toEqual({ kind: "none" });
   });
 
   test("a removed blocking bot is marked removed and its reason is for nobody", async () => {

@@ -135,47 +135,53 @@ test("Home opens the list on the first option", () => {
   expect(activeOptionText()).toBe("Apple");
 });
 
-test("typing moves to the option that starts with the typed text", () => {
-  openWithKeyboard();
+const CRABS = { names: ["Apple", "Crab", "Cranberry"], initial: "Apple" };
+const SEARCH_RESET_MS = 1_000;
 
-  press("c");
-  expect(activeOptionText()).toBe("Cherry");
-  press("r");
-  expect(activeOptionText()).toBe("Cranberry");
-});
-
-test("typing the same letter again cycles through its options", () => {
+test.each([
+  {
+    name: "typing moves to the option that starts with the typed text",
+    props: {},
+    typed: ["c", "r"],
+    active: ["Cherry", "Cranberry"],
+    pauses: false,
+  },
+  {
+    name: "the same letter typed after a pause cycles through its options",
+    props: {},
+    typed: ["b", "b"],
+    active: ["Blueberry", "Banana"],
+    pauses: true,
+  },
+  {
+    name: "a longer search stays on the active option while it still matches",
+    props: CRABS,
+    typed: ["c", "r", "a", "n"],
+    active: ["Crab", "Crab", "Crab", "Cranberry"],
+    pauses: false,
+  },
+  {
+    name: "repeating one letter cycles through the options it starts",
+    props: CRABS,
+    typed: ["c", "c", "c"],
+    active: ["Crab", "Cranberry", "Crab"],
+    pauses: false,
+  },
+])("$name", ({ props, typed, active, pauses }) => {
   vi.useFakeTimers();
-  openWithKeyboard();
+  openWithKeyboard(props);
 
-  press("b");
-  expect(activeOptionText()).toBe("Blueberry");
-  vi.advanceTimersByTime(1_000);
-  press("b");
-  expect(activeOptionText()).toBe("Banana");
+  for (const [index, key] of typed.entries()) {
+    press(key);
+    expect(
+      activeOptionText(),
+      `after ${typed.slice(0, index + 1).join("")}`,
+    ).toBe(active[index]);
+
+    if (pauses) vi.advanceTimersByTime(SEARCH_RESET_MS);
+  }
+
   vi.useRealTimers();
-});
-
-test("a longer search stays on the active option while it still matches", () => {
-  openWithKeyboard({ names: ["Apple", "Crab", "Cranberry"], initial: "Apple" });
-
-  press("c");
-  expect(activeOptionText()).toBe("Crab");
-  press("r");
-  expect(activeOptionText()).toBe("Crab");
-  press("a");
-  press("n");
-  expect(activeOptionText()).toBe("Cranberry");
-});
-
-test("repeating one letter cycles through the options it starts", () => {
-  openWithKeyboard({ names: ["Apple", "Crab", "Cranberry"], initial: "Apple" });
-
-  press("c");
-  press("c");
-  expect(activeOptionText()).toBe("Cranberry");
-  press("c");
-  expect(activeOptionText()).toBe("Crab");
 });
 
 test("Space acts on its release, so its press alone changes nothing", () => {

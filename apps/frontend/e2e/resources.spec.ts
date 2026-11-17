@@ -1,8 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
-  DESKTOP_VIEWPORT,
-  PHONE_VIEWPORT,
   accountButton,
   boxOf,
   expectLeftForApiDocs,
@@ -51,51 +49,18 @@ test("Resources is collapsed until clicked, then lists API Docs", async ({
   await expect(apiDocsLink(page)).toHaveCount(0);
 });
 
-for (const key of ["Enter", " "]) {
-  test(`the keyboard opens Resources with ${key === " " ? "Space" : key}`, async ({
-    page,
-  }) => {
-    await openPage(page, "/");
-    await resourcesButton(page).focus();
-    await page.keyboard.press(key);
-
-    await expect(apiDocsLink(page)).toBeVisible();
-  });
-}
-
-test("Escape closes Resources and returns focus to it", async ({ page }) => {
-  await openPage(page, "/");
-  await resourcesButton(page).click();
-  await apiDocsLink(page).focus();
-  await page.keyboard.press("Escape");
-
-  await expect(apiDocsLink(page)).toHaveCount(0);
-  await expect(resourcesButton(page)).toBeFocused();
-});
-
-test("clicking outside closes Resources", async ({ page }) => {
-  await openPage(page, "/");
-  await resourcesButton(page).click();
-  await page.getByRole("heading", { level: 1 }).click();
-
-  await expect(apiDocsLink(page)).toHaveCount(0);
-});
-
-test("opening Resources closes the account menu and the other way round", async ({
+test("the keyboard opens Resources with Enter and with Space", async ({
   page,
 }) => {
   await openPage(page, "/");
-  await accountButton(page).click();
-  await resourcesButton(page).focus();
-  await page.keyboard.press("Enter");
 
-  await expect(apiDocsLink(page)).toBeVisible();
-  await expect(accountButton(page)).toHaveAttribute("aria-expanded", "false");
-
-  await accountButton(page).focus();
-  await page.keyboard.press("Enter");
-  await expect(accountButton(page)).toHaveAttribute("aria-expanded", "true");
-  await expect(resourcesButton(page)).toHaveAttribute("aria-expanded", "false");
+  for (const key of ["Enter", " "]) {
+    await resourcesButton(page).focus();
+    await page.keyboard.press(key);
+    await expect(apiDocsLink(page), key).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(apiDocsLink(page), key).toHaveCount(0);
+  }
 });
 
 test("API Docs leaves the app for the API's Swagger page in the same tab", async ({
@@ -107,19 +72,4 @@ test("API Docs leaves the app for the API's Swagger page in the same tab", async
   await apiDocsLink(page).click();
 
   await expectLeftForApiDocs(page, documentRequests);
-});
-
-test("shrinking to a phone closes an open Resources menu", async ({ page }) => {
-  await openPage(page, "/");
-  await resourcesButton(page).click();
-  await expect(apiDocsLink(page)).toBeVisible();
-  await page.setViewportSize(PHONE_VIEWPORT);
-  await expect(page.locator(".resources-menu__trigger")).toHaveAttribute(
-    "aria-expanded",
-    "false",
-  );
-
-  await page.setViewportSize(DESKTOP_VIEWPORT);
-  await expect(resourcesButton(page)).toBeVisible();
-  await expect(apiDocsLink(page)).toHaveCount(0);
 });

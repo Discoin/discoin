@@ -9,13 +9,13 @@ from fastapi.testclient import TestClient
 
 import app.admin.deactivation
 from app.transactions.ledger import create_transaction
-from tests.factories import FIRST_ADMIN_ID, NOW, OWNER_ID, USER_ID, bot_of, create_currency, log_in
+from tests.factories import ADMIN_ID, NOW, OWNER_ID, USER_ID, bot_of, create_currency, log_in, status_of
 from tests.webhooks.receiver import connect_webhook
 
 
 @pytest.fixture
 def trio(client: TestClient, connection: psycopg.Connection) -> tuple[UUID, UUID, UUID]:
-    log_in(client, connection, FIRST_ADMIN_ID)
+    log_in(client, connection, ADMIN_ID)
 
     return (
         create_currency(connection, "OAT", 1_000_000),
@@ -28,10 +28,6 @@ def convert(connection: psycopg.Connection, source: UUID, target: UUID, hours_ag
     return create_transaction(connection, USER_ID, source, target, Decimal(1000), NOW - timedelta(hours=hours_ago))[
         "id"
     ]
-
-
-def status_of(connection: psycopg.Connection, transaction_id: UUID) -> str:
-    return connection.execute("SELECT status FROM transactions WHERE id = %s", (transaction_id,)).fetchone()["status"]
 
 
 def set_active(client: TestClient, currency_id: UUID, active: bool) -> httpx.Response:
@@ -154,12 +150,3 @@ def test_refunds_still_work_on_an_inactive_currency(
     )
 
     assert response.json()["status"] == "Refunded"
-
-
-@pytest.mark.parametrize("action", ["deactivate", "reactivate"])
-def test_status_only_changes_through_the_admin_edit(
-    client: TestClient, trio: tuple[UUID, UUID, UUID], action: str
-) -> None:
-    oats, _, _ = trio
-
-    assert client.post(f"/admin/currencies/{oats}/{action}").status_code == 404

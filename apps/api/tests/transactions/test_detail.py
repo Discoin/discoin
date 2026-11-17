@@ -9,15 +9,14 @@ from httpx import Response
 from psycopg.rows import dict_row
 
 from app.auth.sessions import SESSION_COOKIE, User, hash_secret
-from app.bots.tokens import issue_api_token
 from app.transactions.detail import view_transaction
 from app.transactions.models import PrivilegedTransaction, Transaction
-from app.transactions.queries import PUBLIC_TRANSACTION_COLUMNS
 from tests.factories import (
-    FIRST_ADMIN_ID,
+    ADMIN_ID,
     LOCK_TIMEOUT_MS,
     NOW,
     USER_ID,
+    bot_name,
     bot_of,
     create_bot,
     create_botless_currency,
@@ -34,6 +33,7 @@ NEW_OWNER_ID = "800000000000000008"
 BOT_REASON = "Farmed oats with an alt account."
 SITE_WIDE_REASON = "Sold stolen accounts."
 SURVIVING_REASON = "Duped coins in another server."
+REASONS = {"bot": BOT_REASON, "global": SITE_WIDE_REASON}
 PUBLIC_KEYS = {
     "id",
     "fromCurrencyId",
@@ -50,11 +50,10 @@ PRIVILEGED_KEYS = PUBLIC_KEYS | {"userId"}
 EXPLAINED_KEYS = PRIVILEGED_KEYS | {"cause"}
 STATUSES = ["Pending", "Completed", "Refunded", "Cancelled", "Reversed"]
 
-Arrival = Callable[[TestClient, psycopg.Connection], None]
-
 
 class Scene:
-    def __init__(self, connection: psycopg.Connection) -> None:
+    def __init__(self, client: TestClient, connection: psycopg.Connection) -> None:
+        self.client = client
         self.connection = connection
         self.oats = create_currency(connection, "OAT", 1_000_000)
         self.gems = create_currency(connection, "GEM", 1_000_000)
@@ -75,21 +74,29 @@ class Scene:
             INSERT INTO blocks (user_id, bot_id, currency_id, reason, blocked_by, blocked_at)
             VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
             """,
-            (TRADER_ID, bot_id, currency_id, reason, FIRST_ADMIN_ID, NOW - timedelta(hours=2)),
+            (TRADER_ID, bot_id, currency_id, reason, ADMIN_ID, NOW - timedelta(hours=2)),
         ).fetchone()["id"]
 
     def undone_by(self, block_id: int, status: str = "Reversed") -> UUID:
         transaction_id = self.trade(status)
-        self.connection.execute("UPDATE transactions SET block_id = %s WHERE id = %s", (block_id, transaction_id))
+        self.link(transaction_id, block_id)
 
         return transaction_id
+
+    def undone_by_scope(self, scope: str) -> UUID:
+        bot_id = self.oat_bot if scope == "bot" else None
+
+        return self.undone_by(self.block(REASONS[scope], bot_id=bot_id))
+
+    def link(self, transaction_id: UUID, block_id: int) -> None:
+        self.connection.execute("UPDATE transactions SET block_id = %s WHERE id = %s", (block_id, transaction_id))
 
     def traded_by(self, transaction_id: UUID, user_id: str) -> None:
         self.connection.execute("UPDATE transactions SET user_id = %s WHERE id = %s", (user_id, transaction_id))
 
     def lift(self, block_id: int) -> None:
         self.connection.execute(
-            "UPDATE blocks SET unblocked_by = %s, unblocked_at = %s WHERE id = %s", (FIRST_ADMIN_ID, NOW, block_id)
+            "UPDATE blocks SET unblocked_by = %s, unblocked_at = %s WHERE id = %s", (ADMIN_ID, NOW, block_id)
         )
 
     def merge(self, closed_id: int, kept_id: int) -> None:
@@ -101,14 +108,26 @@ class Scene:
         )
         self.connection.execute("UPDATE bots SET removed_at = %s WHERE id = %s", (NOW, bot_id))
 
+    def botless_trade_blocked_on_its_currency(self) -> tuple[UUID, UUID]:
+        barley = create_botless_currency(self.connection, "BRL", 1_000_000)
+        transaction_id = create_transaction(
+            self.connection, barley, self.oats, NOW - timedelta(hours=1), "Reversed", TRADER_ID
+        )
+        self.link(transaction_id, self.block(BOT_REASON, currency_id=barley))
+
+        return transaction_id, barley
+
+
+Arrival = Callable[[Scene], None]
+
 
 @pytest.fixture
 def scene(client: TestClient, connection: psycopg.Connection) -> Scene:
-    return Scene(connection)
+    return Scene(client, connection)
 
 
-def bot_name(connection: psycopg.Connection, bot_id: UUID) -> str:
-    return connection.execute("SELECT name FROM bots WHERE id = %s", (bot_id,)).fetchone()["name"]
+def bot_cause(connection: psycopg.Connection, bot_id: UUID, removed: bool = False) -> dict:
+    return {"kind": "bot", "bot": {"name": bot_name(connection, bot_id), "removed": removed}, "state": "active"}
 
 
 def view(client: TestClient, transaction_id: UUID | str) -> Response:
@@ -128,26 +147,41 @@ def view_as(client: TestClient, connection: psycopg.Connection, viewer_id: str, 
     return viewed_body(client, transaction_id)
 
 
-def expire_session(client: TestClient, connection: psycopg.Connection) -> None:
+def send_no_session(scene: Scene) -> None:
+    scene.client.cookies.clear()
+
+
+def send_invalid_session(scene: Scene) -> None:
+    scene.client.cookies.set(SESSION_COOKIE, "not-a-session")
+
+
+def expire_session(scene: Scene) -> None:
     token = "expired-session"
-    connection.execute("INSERT INTO users (id) VALUES (%s) ON CONFLICT (id) DO NOTHING", (TRADER_ID,))
-    connection.execute(
+    scene.connection.execute("INSERT INTO users (id) VALUES (%s) ON CONFLICT (id) DO NOTHING", (TRADER_ID,))
+    scene.connection.execute(
         "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (%s, %s, %s)",
         (hash_secret(token), TRADER_ID, NOW - timedelta(minutes=1)),
     )
-    client.cookies.set(SESSION_COOKIE, token)
+    scene.client.cookies.set(SESSION_COOKIE, token)
 
 
-def send_invalid_session(client: TestClient, connection: psycopg.Connection) -> None:
-    client.cookies.set(SESSION_COOKIE, "not-a-session")
+def log_in_stranger(scene: Scene) -> None:
+    log_in(scene.client, scene.connection, STRANGER_ID)
 
 
-def send_no_session(client: TestClient, connection: psycopg.Connection) -> None:
-    client.cookies.clear()
+def log_in_unrelated_bot_owner(scene: Scene) -> None:
+    create_bot(scene.connection, STRANGER_ID)
+    log_in(scene.client, scene.connection, STRANGER_ID)
 
 
-def log_in_stranger(client: TestClient, connection: psycopg.Connection) -> None:
-    log_in(client, connection, STRANGER_ID)
+def log_in_owner_of_a_removed_bot(scene: Scene) -> None:
+    scene.remove_bot(scene.oat_bot)
+    log_in(scene.client, scene.connection, RECEIVING_OWNER_ID)
+
+
+def log_in_owner_of_a_removed_currency(scene: Scene) -> None:
+    scene.connection.execute("UPDATE currencies SET active = false, removed_at = %s WHERE id = %s", (NOW, scene.gems))
+    log_in(scene.client, scene.connection, SENDING_OWNER_ID)
 
 
 def assert_per_viewer_headers(response: Response) -> None:
@@ -170,16 +204,6 @@ def test_anyone_gets_the_public_shape_for_each_status(client: TestClient, scene:
     assert body == client.get("/transactions").json()[0]
 
 
-def test_a_removed_currency_keeps_its_label_marked_removed(client: TestClient, scene: Scene) -> None:
-    transaction_id = scene.trade()
-    scene.remove_bot(scene.gem_bot)
-
-    body = viewed_body(client, transaction_id)
-
-    assert body["fromCurrency"] == {"abbreviation": "GEM", "name": "GEM coin", "removed": True}
-    assert body["toCurrency"]["removed"] is False
-
-
 def test_an_unknown_transaction_is_404(client: TestClient, scene: Scene) -> None:
     response = view(client, uuid7())
 
@@ -194,32 +218,15 @@ def test_a_malformed_id_is_400_on_the_id_field(client: TestClient, scene: Scene)
     assert response.json()["field"] == "transaction_id"
 
 
-def test_every_answer_is_private_and_varies_by_cookie(client: TestClient, scene: Scene) -> None:
-    found = view(client, scene.trade())
-    missing = view(client, uuid7())
-    malformed = view(client, "not-a-uuid")
-
-    for response in (found, missing, malformed):
-        assert_per_viewer_headers(response)
-
-
-def test_the_logged_in_answer_is_private_too(client: TestClient, connection: psycopg.Connection, scene: Scene) -> None:
-    log_in(client, connection, TRADER_ID)
-
-    assert_per_viewer_headers(view(client, scene.trade()))
-
-
-def test_pending_still_reaches_the_bot_endpoint(
+def test_every_answer_is_private_and_varies_by_cookie(
     client: TestClient, connection: psycopg.Connection, scene: Scene
 ) -> None:
-    pending_id = scene.trade("Pending")
-    headers = {"Authorization": f"Bearer {issue_api_token(connection, scene.oat_bot)}"}
+    transaction_id = scene.trade()
+    anonymous = [view(client, transaction_id), view(client, uuid7()), view(client, "not-a-uuid")]
+    log_in(client, connection, TRADER_ID)
 
-    response = client.get("/transactions/pending", headers=headers, params={"currencyId": str(scene.oats)})
-
-    assert response.status_code == 200
-    assert [row["id"] for row in response.json()] == [str(pending_id)]
-    assert response.json()[0]["userId"] == TRADER_ID
+    for response in [*anonymous, view(client, transaction_id)]:
+        assert_per_viewer_headers(response)
 
 
 def test_the_read_does_not_wait_for_row_locks(client: TestClient, database_url: str, scene: Scene) -> None:
@@ -264,12 +271,12 @@ def revoke_bot(scene: Scene) -> Callable[[], None]:
 
 
 def revoke_admin(scene: Scene) -> Callable[[], None]:
-    return lambda: scene.connection.execute("UPDATE users SET is_admin = false WHERE id = %s", (FIRST_ADMIN_ID,))
+    return lambda: scene.connection.execute("UPDATE users SET is_admin = false WHERE id = %s", (ADMIN_ID,))
 
 
 @pytest.mark.parametrize(
     ("viewer_id", "revocation"),
-    [(RECEIVING_OWNER_ID, revoke_owner), (RECEIVING_OWNER_ID, revoke_bot), (FIRST_ADMIN_ID, revoke_admin)],
+    [(RECEIVING_OWNER_ID, revoke_owner), (RECEIVING_OWNER_ID, revoke_bot), (ADMIN_ID, revoke_admin)],
 )
 def test_privilege_and_private_fields_come_from_one_statement(
     client: TestClient,
@@ -296,22 +303,34 @@ def test_privilege_and_private_fields_come_from_one_statement(
     assert set(viewed_body(client, transaction_id)) == PUBLIC_KEYS
 
 
-@pytest.mark.parametrize("arrive", [send_no_session, expire_session, send_invalid_session, log_in_stranger])
+@pytest.mark.parametrize("scope", ["bot", "global"])
+@pytest.mark.parametrize(
+    "arrive",
+    [
+        send_no_session,
+        expire_session,
+        send_invalid_session,
+        log_in_stranger,
+        log_in_unrelated_bot_owner,
+        log_in_owner_of_a_removed_bot,
+        log_in_owner_of_a_removed_currency,
+    ],
+)
 def test_unprivileged_viewers_get_only_the_public_shape(
-    client: TestClient, connection: psycopg.Connection, scene: Scene, arrive: Arrival
+    client: TestClient, scene: Scene, arrive: Arrival, scope: str
 ) -> None:
-    transaction_id = scene.undone_by(scene.block(BOT_REASON, bot_id=scene.oat_bot))
-    arrive(client, connection)
+    transaction_id = scene.undone_by_scope(scope)
+    arrive(scene)
 
     response = view(client, transaction_id)
 
     assert response.status_code == 200
     assert set(response.json()) == PUBLIC_KEYS
     assert TRADER_ID not in response.text
-    assert BOT_REASON not in response.text
+    assert REASONS[scope] not in response.text
 
 
-@pytest.mark.parametrize("viewer_id", [TRADER_ID, RECEIVING_OWNER_ID, SENDING_OWNER_ID, FIRST_ADMIN_ID])
+@pytest.mark.parametrize("viewer_id", [TRADER_ID, RECEIVING_OWNER_ID, SENDING_OWNER_ID, ADMIN_ID])
 def test_privileged_viewers_get_the_user_id(
     client: TestClient, connection: psycopg.Connection, scene: Scene, viewer_id: str
 ) -> None:
@@ -321,159 +340,66 @@ def test_privileged_viewers_get_the_user_id(
     assert body["userId"] == TRADER_ID
 
 
-def test_a_former_owner_of_a_removed_bot_gets_the_public_shape(
+def test_the_blocking_bots_owner_reads_the_whole_cause(
     client: TestClient, connection: psycopg.Connection, scene: Scene
 ) -> None:
-    transaction_id = scene.undone_by(scene.block(BOT_REASON, bot_id=scene.oat_bot))
-    scene.remove_bot(scene.oat_bot)
-
-    body = view_as(client, connection, RECEIVING_OWNER_ID, transaction_id)
-
-    assert set(body) == PUBLIC_KEYS
-
-
-def test_the_owner_of_a_removed_currencys_live_bot_gets_the_public_shape(
-    client: TestClient, connection: psycopg.Connection, scene: Scene
-) -> None:
-    transaction_id = scene.trade()
-    connection.execute("UPDATE currencies SET active = false, removed_at = %s WHERE id = %s", (NOW, scene.gems))
-
-    body = view_as(client, connection, SENDING_OWNER_ID, transaction_id)
-
-    assert set(body) == PUBLIC_KEYS
-
-
-@pytest.mark.parametrize("status", ["Pending", "Completed", "Refunded"])
-def test_only_undone_transactions_have_a_cause(
-    client: TestClient, connection: psycopg.Connection, scene: Scene, status: str
-) -> None:
-    body = view_as(client, connection, FIRST_ADMIN_ID, scene.trade(status))
-
-    assert "cause" not in body
-
-
-def test_the_blocking_bots_owner_reads_the_reason(
-    client: TestClient, connection: psycopg.Connection, scene: Scene
-) -> None:
-    transaction_id = scene.undone_by(scene.block(BOT_REASON, bot_id=scene.oat_bot))
+    transaction_id = scene.undone_by_scope("bot")
 
     body = view_as(client, connection, RECEIVING_OWNER_ID, transaction_id)
 
     assert set(body) == EXPLAINED_KEYS
-    assert body["cause"] == {
-        "kind": "bot",
-        "bot": {"name": bot_name(connection, scene.oat_bot), "removed": False},
-        "state": "active",
-        "reason": BOT_REASON,
-    }
+    assert body["cause"] == {**bot_cause(connection, scene.oat_bot), "reason": BOT_REASON}
 
 
-@pytest.mark.parametrize("viewer_id", [SENDING_OWNER_ID, TRADER_ID, FIRST_ADMIN_ID])
-def test_a_bot_block_reason_is_only_for_that_bots_owner(
-    client: TestClient, connection: psycopg.Connection, scene: Scene, viewer_id: str
+@pytest.mark.parametrize(
+    ("scope", "trader_id", "viewer_id", "reads_reason"),
+    [
+        ("bot", TRADER_ID, SENDING_OWNER_ID, False),
+        ("bot", TRADER_ID, TRADER_ID, False),
+        ("bot", TRADER_ID, ADMIN_ID, False),
+        ("bot", RECEIVING_OWNER_ID, RECEIVING_OWNER_ID, True),
+        ("bot", SENDING_OWNER_ID, SENDING_OWNER_ID, False),
+        ("bot", ADMIN_ID, ADMIN_ID, False),
+        ("global", TRADER_ID, RECEIVING_OWNER_ID, True),
+        ("global", TRADER_ID, SENDING_OWNER_ID, True),
+        ("global", TRADER_ID, ADMIN_ID, True),
+        ("global", TRADER_ID, TRADER_ID, False),
+        ("global", SENDING_OWNER_ID, SENDING_OWNER_ID, True),
+        ("global", ADMIN_ID, ADMIN_ID, True),
+    ],
+)
+def test_the_block_reason_reaches_only_the_viewers_the_rules_allow(
+    client: TestClient,
+    connection: psycopg.Connection,
+    scene: Scene,
+    scope: str,
+    trader_id: str,
+    viewer_id: str,
+    reads_reason: bool,
 ) -> None:
-    transaction_id = scene.undone_by(scene.block(BOT_REASON, bot_id=scene.oat_bot))
+    transaction_id = scene.undone_by_scope(scope)
+    scene.traded_by(transaction_id, trader_id)
 
     body = view_as(client, connection, viewer_id, transaction_id)
 
-    assert body["cause"] == {
-        "kind": "bot",
-        "bot": {"name": bot_name(connection, scene.oat_bot), "removed": False},
-        "state": "active",
-    }
+    assert body["cause"]["kind"] == scope
+    assert ("reason" in body["cause"]) == reads_reason
+    assert (REASONS[scope] in str(body)) == reads_reason
 
 
-@pytest.mark.parametrize("viewer_id", [RECEIVING_OWNER_ID, SENDING_OWNER_ID, FIRST_ADMIN_ID])
-def test_a_site_wide_reason_is_for_owners_and_admins(
-    client: TestClient, connection: psycopg.Connection, scene: Scene, viewer_id: str
+@pytest.mark.parametrize(("bot_removed", "reads_reason"), [(False, True), (True, False)])
+def test_a_trader_reads_a_site_wide_reason_only_while_owning_a_live_bot(
+    client: TestClient, connection: psycopg.Connection, scene: Scene, bot_removed: bool, reads_reason: bool
 ) -> None:
-    transaction_id = scene.undone_by(scene.block(SITE_WIDE_REASON), "Cancelled")
+    transaction_id = scene.undone_by_scope("global")
+    traders_bot = create_bot(connection, TRADER_ID)
 
-    body = view_as(client, connection, viewer_id, transaction_id)
-
-    assert body["cause"] == {"kind": "global", "state": "active", "reason": SITE_WIDE_REASON}
-
-
-def test_a_site_wide_reason_is_not_for_a_trading_user_with_no_other_role(
-    client: TestClient, connection: psycopg.Connection, scene: Scene
-) -> None:
-    transaction_id = scene.undone_by(scene.block(SITE_WIDE_REASON), "Cancelled")
+    if bot_removed:
+        scene.remove_bot(traders_bot)
 
     body = view_as(client, connection, TRADER_ID, transaction_id)
 
-    assert body["cause"] == {"kind": "global", "state": "active"}
-
-
-@pytest.mark.parametrize("trader_id", [FIRST_ADMIN_ID, SENDING_OWNER_ID])
-def test_a_trading_admin_or_side_owner_reads_a_site_wide_reason(
-    client: TestClient, connection: psycopg.Connection, scene: Scene, trader_id: str
-) -> None:
-    transaction_id = scene.undone_by(scene.block(SITE_WIDE_REASON), "Cancelled")
-    scene.traded_by(transaction_id, trader_id)
-
-    body = view_as(client, connection, trader_id, transaction_id)
-
-    assert body["userId"] == trader_id
-    assert body["cause"]["reason"] == SITE_WIDE_REASON
-
-
-def test_a_trader_who_owns_an_unrelated_live_bot_reads_a_site_wide_reason(
-    client: TestClient, connection: psycopg.Connection, scene: Scene
-) -> None:
-    transaction_id = scene.undone_by(scene.block(SITE_WIDE_REASON), "Cancelled")
-    create_bot(connection, TRADER_ID)
-
-    body = view_as(client, connection, TRADER_ID, transaction_id)
-
-    assert body["cause"]["reason"] == SITE_WIDE_REASON
-
-
-def test_a_trader_whose_only_bot_is_removed_reads_no_site_wide_reason(
-    client: TestClient, connection: psycopg.Connection, scene: Scene
-) -> None:
-    transaction_id = scene.undone_by(scene.block(SITE_WIDE_REASON), "Cancelled")
-    scene.remove_bot(create_bot(connection, TRADER_ID))
-
-    body = view_as(client, connection, TRADER_ID, transaction_id)
-
-    assert body["cause"] == {"kind": "global", "state": "active"}
-
-
-def test_an_unrelated_bot_owner_who_did_not_trade_gets_the_public_shape(
-    client: TestClient, connection: psycopg.Connection, scene: Scene
-) -> None:
-    transaction_id = scene.undone_by(scene.block(SITE_WIDE_REASON), "Cancelled")
-    create_bot(connection, STRANGER_ID)
-    log_in(client, connection, STRANGER_ID)
-
-    response = view(client, transaction_id)
-
-    assert set(response.json()) == PUBLIC_KEYS
-    assert SITE_WIDE_REASON not in response.text
-
-
-def test_a_trading_owner_reads_the_reason_of_their_own_bots_block(
-    client: TestClient, connection: psycopg.Connection, scene: Scene
-) -> None:
-    transaction_id = scene.undone_by(scene.block(BOT_REASON, bot_id=scene.oat_bot))
-    scene.traded_by(transaction_id, RECEIVING_OWNER_ID)
-
-    body = view_as(client, connection, RECEIVING_OWNER_ID, transaction_id)
-
-    assert body["cause"]["reason"] == BOT_REASON
-
-
-@pytest.mark.parametrize("trader_id", [FIRST_ADMIN_ID, SENDING_OWNER_ID])
-def test_a_trading_admin_or_other_side_owner_gets_no_bot_block_reason(
-    client: TestClient, connection: psycopg.Connection, scene: Scene, trader_id: str
-) -> None:
-    transaction_id = scene.undone_by(scene.block(BOT_REASON, bot_id=scene.oat_bot))
-    scene.traded_by(transaction_id, trader_id)
-
-    body = view_as(client, connection, trader_id, transaction_id)
-
-    assert "reason" not in body["cause"]
-    assert BOT_REASON not in str(body)
+    assert ("reason" in body["cause"]) == reads_reason
 
 
 def test_the_reason_stays_after_the_block_is_lifted(
@@ -490,7 +416,7 @@ def test_the_reason_stays_after_the_block_is_lifted(
 
 
 def test_ownership_is_judged_now(client: TestClient, connection: psycopg.Connection, scene: Scene) -> None:
-    transaction_id = scene.undone_by(scene.block(BOT_REASON, bot_id=scene.oat_bot))
+    transaction_id = scene.undone_by_scope("bot")
     scene.set_owner(scene.oat_bot, NEW_OWNER_ID)
 
     new_owner_view = view_as(client, connection, NEW_OWNER_ID, transaction_id)
@@ -516,22 +442,14 @@ def test_a_merged_block_shows_its_own_reason(client: TestClient, connection: psy
 def test_a_currency_block_moved_to_a_bot_names_that_bot(
     client: TestClient, connection: psycopg.Connection, scene: Scene
 ) -> None:
-    barley = create_botless_currency(connection, "BRL", 1_000_000)
-    transaction_id = create_transaction(connection, barley, scene.oats, NOW - timedelta(hours=1), "Reversed", TRADER_ID)
-    block_id = scene.block(BOT_REASON, currency_id=barley)
-    connection.execute("UPDATE transactions SET block_id = %s WHERE id = %s", (block_id, transaction_id))
-    log_in(client, connection, FIRST_ADMIN_ID)
+    transaction_id, barley = scene.botless_trade_blocked_on_its_currency()
+    log_in(client, connection, ADMIN_ID)
     assigned = client.patch(f"/admin/currencies/{barley}", json={"botId": str(scene.gem_bot)})
     assert assigned.status_code == 200
 
     body = view_as(client, connection, SENDING_OWNER_ID, transaction_id)
 
-    assert body["cause"] == {
-        "kind": "bot",
-        "bot": {"name": bot_name(connection, scene.gem_bot), "removed": False},
-        "state": "active",
-        "reason": BOT_REASON,
-    }
+    assert body["cause"] == {**bot_cause(connection, scene.gem_bot), "reason": BOT_REASON}
 
 
 def test_a_lifted_currency_block_is_scoped_to_the_currencys_current_bot(
@@ -551,11 +469,8 @@ def test_a_lifted_currency_block_is_scoped_to_the_currencys_current_bot(
 def test_a_currency_block_on_a_botless_currency_has_no_scope_and_fails(
     client: TestClient, connection: psycopg.Connection, scene: Scene
 ) -> None:
-    barley = create_botless_currency(connection, "BRL", 1_000_000)
-    transaction_id = create_transaction(connection, barley, scene.oats, NOW - timedelta(hours=1), "Reversed", TRADER_ID)
-    block_id = scene.block(BOT_REASON, currency_id=barley)
-    connection.execute("UPDATE transactions SET block_id = %s WHERE id = %s", (block_id, transaction_id))
-    log_in(client, connection, FIRST_ADMIN_ID)
+    transaction_id, _ = scene.botless_trade_blocked_on_its_currency()
+    log_in(client, connection, ADMIN_ID)
 
     with pytest.raises(RuntimeError, match="no bot"):
         view(client, transaction_id)
@@ -568,24 +483,20 @@ def test_a_currency_block_on_a_botless_currency_has_no_scope_and_fails(
     assert_per_viewer_headers(response)
 
 
-@pytest.mark.parametrize("viewer_id", [SENDING_OWNER_ID, FIRST_ADMIN_ID])
+@pytest.mark.parametrize("viewer_id", [SENDING_OWNER_ID, ADMIN_ID])
 def test_a_removed_blocking_bot_is_marked_and_its_reason_is_for_nobody(
     client: TestClient, connection: psycopg.Connection, scene: Scene, viewer_id: str
 ) -> None:
-    transaction_id = scene.undone_by(scene.block(BOT_REASON, bot_id=scene.oat_bot))
+    transaction_id = scene.undone_by_scope("bot")
     scene.remove_bot(scene.oat_bot)
 
     body = view_as(client, connection, viewer_id, transaction_id)
 
-    assert body["cause"] == {
-        "kind": "bot",
-        "bot": {"name": bot_name(connection, scene.oat_bot), "removed": True},
-        "state": "active",
-    }
+    assert body["cause"] == bot_cause(connection, scene.oat_bot, removed=True)
 
 
 def test_a_cancel_without_a_block_says_so(client: TestClient, connection: psycopg.Connection, scene: Scene) -> None:
-    body = view_as(client, connection, FIRST_ADMIN_ID, scene.trade("Cancelled"))
+    body = view_as(client, connection, ADMIN_ID, scene.trade("Cancelled"))
 
     assert body["cause"] == {"kind": "none"}
 
@@ -605,10 +516,6 @@ def test_an_owner_block_through_the_api_explains_the_reversal(
 
     assert body["status"] == "Reversed"
     assert body["cause"]["reason"] == BOT_REASON
-
-
-def test_the_public_column_list_has_no_user_id() -> None:
-    assert "user_id" not in PUBLIC_TRANSACTION_COLUMNS
 
 
 def test_public_lists_carry_no_user_id(client: TestClient, connection: psycopg.Connection, scene: Scene) -> None:

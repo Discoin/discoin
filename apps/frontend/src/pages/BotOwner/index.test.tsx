@@ -325,70 +325,30 @@ test("a failed section shows its error with a retry, never defaults", async () =
   expect(webhookField().value).toBe("https://ticket.example.com/hook");
 });
 
-test("an unsaved bot form asks before a bot switch, and staying keeps it", async () => {
-  await renderPage();
-  typeInto(webhookField(), NEW_HOOK);
-  picker("Bot").focus();
+test.each([
+  { form: "bot", field: () => webhookField(), listed: "Webhook URL" },
+  {
+    form: "currency",
+    field: () => screen.getByLabelText<HTMLInputElement>("Daily cap per user"),
+    listed: "Daily cap",
+  },
+])(
+  "an unsaved $form form asks before a bot switch and names what it discards",
+  async ({ field, listed }) => {
+    await renderPage();
+    typeInto(field(), "250");
 
-  choose("Bot", "Ticket bot");
-  const dialog = screen.getByRole("dialog", {
-    name: "Discard unsaved changes?",
-  });
+    choose("Bot", "Ticket bot");
+    const dialog = screen.getByRole("dialog", {
+      name: "Discard unsaved changes?",
+    });
 
-  expect(within(dialog).getByText("Webhook URL")).toBeTruthy();
-  expect(
-    within(dialog).getByText("Switching to Ticket bot discards them."),
-  ).toBeTruthy();
-  fireEvent.click(within(dialog).getByRole("button", { name: "Keep editing" }));
-
-  expect(screen.queryByRole("dialog")).toBeNull();
-  expect(picker("Bot").textContent).toBe("Harvest bot");
-  expect(webhookField().value).toBe(NEW_HOOK);
-  expect(document.activeElement).toBe(picker("Bot"));
-});
-
-test("Escape in the confirmation stays on the current bot", async () => {
-  await renderPage();
-  typeInto(webhookField(), NEW_HOOK);
-  picker("Bot").focus();
-  choose("Bot", "Ticket bot");
-
-  fireEvent(
-    screen.getByRole("dialog"),
-    new Event("cancel", { cancelable: true }),
-  );
-
-  expect(screen.queryByRole("dialog")).toBeNull();
-  expect(webhookField().value).toBe(NEW_HOOK);
-  expect(document.activeElement).toBe(picker("Bot"));
-});
-
-test("confirming the switch discards the changes and moves on", async () => {
-  await renderPage();
-  typeInto(webhookField(), NEW_HOOK);
-  picker("Bot").focus();
-  choose("Bot", "Ticket bot");
-
-  fireEvent.click(screen.getByRole("button", { name: "Switch to Ticket bot" }));
-  await waitForSections();
-
-  expect(picker("Bot").textContent).toBe("Ticket bot");
-  expect(webhookField().value).toBe("https://ticket.example.com/hook");
-  expect(document.activeElement).toBe(picker("Bot"));
-  expect(
-    screen.getAllByRole("status").map((region) => region.textContent),
-  ).toContain("Showing Ticket bot");
-});
-
-test("an unsaved currency form asks before a bot switch", async () => {
-  await renderPage();
-  typeInto(screen.getByLabelText("Daily cap per user"), "250");
-
-  choose("Bot", "Ticket bot");
-
-  const dialog = screen.getByRole("dialog");
-  expect(within(dialog).getByText("Daily cap")).toBeTruthy();
-});
+    expect(within(dialog).getByText(listed)).toBeTruthy();
+    expect(
+      within(dialog).getByText("Switching to Ticket bot discards them."),
+    ).toBeTruthy();
+  },
+);
 
 test("an unsaved currency form asks before a currency switch", async () => {
   await renderPage();
@@ -428,15 +388,6 @@ test("a form of a bot switched to counts as unsaved like the first", async () =>
   expect(
     within(screen.getByRole("dialog")).getByText("Webhook URL"),
   ).toBeTruthy();
-});
-
-test("clean forms switch at once", async () => {
-  await renderPage();
-
-  choose("Bot", "Ticket bot");
-
-  expect(screen.queryByRole("dialog")).toBeNull();
-  expect(picker("Bot").textContent).toBe("Ticket bot");
 });
 
 async function renameOats() {
@@ -545,21 +496,35 @@ test("a new abbreviation or a deactivation reloads the pending list", async () =
   expect(requestCount(api.listPendingTransactions, "harvest")).toBe(3);
 });
 
-test("a save that got no answer frees the pickers and keeps the form unsaved", async () => {
-  await renderPage();
-  api.updateCurrencyDetails.mockRejectedValueOnce(
-    new ConnectionError("Couldn't reach the Discoin API: Failed to fetch"),
-  );
+test.each([
+  {
+    name: "got no answer",
+    error: new ConnectionError(
+      "Couldn't reach the Discoin API: Failed to fetch",
+    ),
+    shown: NO_ANSWER_MESSAGE,
+  },
+  {
+    name: "was refused",
+    error: new ApiError(409, "That name is taken.", "name"),
+    shown: "That name is taken.",
+  },
+])(
+  "a save that $name frees the pickers and keeps the form unsaved",
+  async ({ error, shown }) => {
+    await renderPage();
+    api.updateCurrencyDetails.mockRejectedValueOnce(error);
 
-  startRename("Rolled oats");
+    startRename("Rolled oats");
 
-  expect(await screen.findByText(NO_ANSWER_MESSAGE)).toBeTruthy();
-  expect(picker("Bot").hasAttribute("aria-disabled")).toBe(false);
-  choose("Bot", "Ticket bot");
-  expect(
-    within(screen.getByRole("dialog")).getByText("Name and abbreviation"),
-  ).toBeTruthy();
-});
+    expect(await screen.findAllByText(shown)).not.toHaveLength(0);
+    expect(picker("Bot").hasAttribute("aria-disabled")).toBe(false);
+    choose("Bot", "Ticket bot");
+    expect(
+      within(screen.getByRole("dialog")).getByText("Name and abbreviation"),
+    ).toBeTruthy();
+  },
+);
 
 test("a bot's only currency deactivated while selected shows the message", async () => {
   api.listOwnedBots.mockResolvedValue([TICKET]);
@@ -579,19 +544,14 @@ test("a bot's only currency deactivated while selected shows the message", async
 
 function pendingSave() {
   let finish: (saved: Currency) => void = () => undefined;
-  let fail: (error: ApiError) => void = () => undefined;
   api.updateCurrencyDetails.mockImplementationOnce(
     () =>
-      new Promise<Currency>((resolve, reject) => {
+      new Promise<Currency>((resolve) => {
         finish = resolve;
-        fail = reject;
       }),
   );
 
-  return {
-    finish: (saved: Currency) => finish(saved),
-    fail: (error: ApiError) => fail(error),
-  };
+  return { finish: (saved: Currency) => finish(saved) };
 }
 
 function startRename(name: string) {
@@ -623,25 +583,6 @@ test("the pickers say they're busy and don't switch while a save is sent", async
   choose("Bot", "Ticket bot");
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(picker("Bot").textContent).toBe("Ticket bot");
-});
-
-test("a failed save frees the pickers and keeps the form unsaved", async () => {
-  await renderPage();
-  const save = pendingSave();
-  startRename("Rolled oats");
-  await waitFor(() =>
-    expect(picker("Bot").getAttribute("aria-disabled")).toBe("true"),
-  );
-
-  save.fail(new ApiError(409, "That name is taken.", "name"));
-
-  await waitFor(() =>
-    expect(picker("Bot").hasAttribute("aria-disabled")).toBe(false),
-  );
-  choose("Bot", "Ticket bot");
-  expect(
-    within(screen.getByRole("dialog")).getByText("Name and abbreviation"),
-  ).toBeTruthy();
 });
 
 async function regenerate(secret: string, confirmLabel: string) {

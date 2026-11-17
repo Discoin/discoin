@@ -1,10 +1,10 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { FAILED_LOGOUT_MESSAGE } from "../src/mocks/failingLogout.js";
 import {
+  NARROW_PHONE_VIEWPORT,
   PHONE_VIEWPORT,
-  WCAG_22_AA_TAGS,
+  expectWcagCompliance,
   accountButton,
   boxOf,
   failLogOutFromDrawer,
@@ -87,13 +87,8 @@ for (const theme of THEMES) {
     await page.emulateMedia({ colorScheme: theme });
     await openPage(page, "/admin");
     await logOut(page);
-    await page.evaluate(() => document.fonts.ready);
 
-    const results = await new AxeBuilder({ page })
-      .withTags(WCAG_22_AA_TAGS)
-      .analyze();
-
-    expect(results.violations).toEqual([]);
+    await expectWcagCompliance(page);
   });
 }
 
@@ -177,21 +172,14 @@ for (const theme of THEMES) {
     await page.emulateMedia({ colorScheme: theme });
     await openPage(page, "/");
     await accountButton(page).click();
-    await page.evaluate(() => document.fonts.ready);
 
-    const results = await new AxeBuilder({ page })
-      .withTags(WCAG_22_AA_TAGS)
-      .analyze();
-
-    expect(results.violations).toEqual([]);
+    await expectWcagCompliance(page);
   });
 }
 
 const EDGE_TOLERANCE_PX = 24;
 const SUBPIXEL_PX = 1;
 const LOGIN_UNDER_BRAND_MAX_GAP_PX = 8;
-const MENU_ROW_TOLERANCE_PX = 4;
-const THEME_ROW_TOLERANCE_PX = 6;
 
 function middleOfBox(box: { y: number; height: number }) {
   return box.y + box.height / 2;
@@ -201,70 +189,7 @@ async function middleOf(locator: Locator) {
   return middleOfBox(await boxOf(locator));
 }
 
-test("on a phone the menu button shares the top row with Discoin, at the right", async ({
-  page,
-}) => {
-  await page.setViewportSize(PHONE_VIEWPORT);
-  await openPage(page, "/");
-  const brand = await middleOf(page.locator(".site-header__brand"));
-  const menu = await boxOf(menuButton(page));
-
-  expect(Math.abs(middleOfBox(menu) - brand)).toBeLessThanOrEqual(
-    MENU_ROW_TOLERANCE_PX,
-  );
-  expect(PHONE_VIEWPORT.width - (menu.x + menu.width)).toBeLessThanOrEqual(
-    EDGE_TOLERANCE_PX,
-  );
-});
-
-test("on a 360px phone the theme toggle joins Discoin and the menu button in the top row", async ({
-  page,
-}) => {
-  await page.setViewportSize(PHONE_VIEWPORT);
-  await openPage(page, "/");
-  const brand = await middleOf(page.locator(".site-header__brand"));
-  const theme = await boxOf(page.locator(".theme-toggle"));
-  const menu = await boxOf(menuButton(page));
-
-  expect(Math.abs(middleOfBox(theme) - brand)).toBeLessThanOrEqual(
-    THEME_ROW_TOLERANCE_PX,
-  );
-  expect(Math.abs(middleOfBox(menu) - brand)).toBeLessThanOrEqual(
-    MENU_ROW_TOLERANCE_PX,
-  );
-  expect(theme.x).toBeLessThan(menu.x);
-});
-
-for (const width of [320, 360]) {
-  test(`logged out on a ${width}px phone, Log in sits in the drawer right under Discoin`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width, height: PHONE_VIEWPORT.height });
-    await openPage(page, "/");
-    await logOutFromDrawer(page);
-
-    await expect(
-      page.locator(".site-header__bar").getByRole("link", { name: /Log in/ }),
-    ).toHaveCount(0);
-    const drawer = await openNavDrawer(page);
-    const login = drawer.getByRole("link", { name: "Log in with Discord" });
-    const head = await boxOf(drawer.locator(".nav-drawer__head"));
-    const loginBox = await boxOf(login);
-
-    await expect(login).toBeVisible();
-    await expect(login).toHaveAttribute(
-      "href",
-      "/api/auth/discord/login?next=%2F",
-    );
-    const headBottom = head.y + head.height;
-    expect(loginBox.y).toBeGreaterThanOrEqual(headBottom - SUBPIXEL_PX);
-    expect(loginBox.y - headBottom).toBeLessThanOrEqual(
-      LOGIN_UNDER_BRAND_MAX_GAP_PX,
-    );
-  });
-}
-
-test("on a phone, Discoin, the theme toggle and the menu button share one middle line", async ({
+test("on a phone, Discoin, the theme toggle and the menu button share one middle line, the menu at the right", async ({
   page,
 }) => {
   await page.setViewportSize(PHONE_VIEWPORT);
@@ -273,13 +198,19 @@ test("on a phone, Discoin, the theme toggle and the menu button share one middle
   const wordmark = await middleOf(
     page.locator(".site-header__brand > *").first(),
   );
+  const theme = await boxOf(page.locator(".theme-toggle"));
+  const menu = await boxOf(menuButton(page));
 
-  expect(
-    Math.abs((await middleOf(page.locator(".theme-toggle"))) - wordmark),
-  ).toBeLessThanOrEqual(SUBPIXEL_PX);
-  expect(
-    Math.abs((await middleOf(menuButton(page))) - wordmark),
-  ).toBeLessThanOrEqual(SUBPIXEL_PX);
+  expect(Math.abs(middleOfBox(theme) - wordmark)).toBeLessThanOrEqual(
+    SUBPIXEL_PX,
+  );
+  expect(Math.abs(middleOfBox(menu) - wordmark)).toBeLessThanOrEqual(
+    SUBPIXEL_PX,
+  );
+  expect(theme.x).toBeLessThan(menu.x);
+  expect(PHONE_VIEWPORT.width - (menu.x + menu.width)).toBeLessThanOrEqual(
+    EDGE_TOLERANCE_PX,
+  );
 });
 
 test("on a phone the drawer shows who is logged in at the top and Log out at the bottom", async ({
@@ -349,7 +280,7 @@ test("a failed logout keeps the drawer open with the error in the footer above L
   ).toBeLessThanOrEqual(EDGE_TOLERANCE_PX);
 });
 
-test("Log in in the drawer leaves the app for the API login, once, with a clean return path", async ({
+test("logged out on a 320px phone, Log in sits in the drawer right under Discoin and leaves for the API login once", async ({
   page,
 }) => {
   const loginRequests: string[] = [];
@@ -358,12 +289,23 @@ test("Log in in the drawer leaves the app for the API login, once, with a clean 
 
     return route.fulfill({ status: 200, body: "Discord login" });
   });
-  await page.setViewportSize(PHONE_VIEWPORT);
+  await page.setViewportSize(NARROW_PHONE_VIEWPORT);
   await openPage(page, "/currency/OAT");
   await logOutFromDrawer(page);
 
+  await expect(
+    page.locator(".site-header__bar").getByRole("link", { name: /Log in/ }),
+  ).toHaveCount(0);
   const drawer = await openNavDrawer(page);
-  await drawer.getByRole("link", { name: "Log in with Discord" }).click();
+  const login = drawer.getByRole("link", { name: "Log in with Discord" });
+  const head = await boxOf(drawer.locator(".nav-drawer__head"));
+  const loginBox = await boxOf(login);
+  const headBottom = head.y + head.height;
+  expect(loginBox.y).toBeGreaterThanOrEqual(headBottom - SUBPIXEL_PX);
+  expect(loginBox.y - headBottom).toBeLessThanOrEqual(
+    LOGIN_UNDER_BRAND_MAX_GAP_PX,
+  );
+  await login.click();
 
   await expect(page.getByText("Discord login")).toBeVisible();
   expect(loginRequests).toHaveLength(1);

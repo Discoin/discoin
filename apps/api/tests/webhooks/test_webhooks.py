@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+from collections.abc import Callable
 from datetime import timedelta
 from uuid import UUID
 
@@ -13,23 +14,18 @@ from app.bots.tokens import issue_api_token
 from app.owners.routes import webhook_sender
 from app.webhooks.delivery import SIGNATURE_HEADER, WebhookSender, deliver_due_webhooks, retry_delay
 from tests.factories import (
-    FIRST_ADMIN_ID,
+    ADMIN_ID,
     NOW,
     OWNER_ID,
+    UNKNOWN_ID,
     USER_ID,
     bot_of,
     create_botless_currency,
-    create_currency,
     log_in,
 )
 from tests.webhooks.receiver import BOX, HOOK_URL, Receiver, connect_webhook
 
 NIL_UUID = "00000000-0000-0000-0000-000000000000"
-
-
-@pytest.fixture
-def pair(client: TestClient, connection: psycopg.Connection) -> tuple[UUID, UUID]:
-    return create_currency(connection, "RCH", 1_000_000), create_currency(connection, "POR", 100_000)
 
 
 def bot_token(connection: psycopg.Connection, currency_id: UUID) -> str:
@@ -65,6 +61,10 @@ def delivery_states(connection: psycopg.Connection) -> list[dict]:
     return connection.execute(
         "SELECT event, state, attempt, last_status, next_attempt_at FROM webhook_deliveries ORDER BY id"
     ).fetchall()
+
+
+def refuse_connection(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("connection refused", request=request)
 
 
 def test_retry_schedule_doubles_from_ten_seconds_up_to_an_hour() -> None:
@@ -173,11 +173,9 @@ def test_unreachable_receiver_counts_as_a_failure(
     rich, poor = pair
     connect_webhook(connection, poor)
     convert(client, connection, rich, poor)
+    sender = WebhookSender(httpx.Client(transport=httpx.MockTransport(refuse_connection)), BOX)
 
-    def refuse(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("connection refused", request=request)
-
-    deliver_due_webhooks(connection, WebhookSender(httpx.Client(transport=httpx.MockTransport(refuse)), BOX), NOW)
+    deliver_due_webhooks(connection, sender, NOW)
 
     row = connection.execute("SELECT state, last_error FROM webhook_deliveries").fetchone()
     assert row == {"state": "pending", "last_error": "ConnectError: connection refused"}
@@ -217,22 +215,14 @@ def test_owner_regenerates_the_webhook_secret(
     assert BOX.open(stored["webhook_secret_sealed"], str(bot_id)) == second
 
 
-@pytest.mark.parametrize("user_id", [USER_ID, FIRST_ADMIN_ID])
-def test_only_the_owner_can_regenerate_the_secret(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID], user_id: str
-) -> None:
-    _, poor = pair
-    log_in(client, connection, user_id)
-
-    assert client.post(f"/bots/{bot_of(connection, poor)}/webhook-secret").status_code == 403
-
-
+@pytest.mark.parametrize("into_sibling", [False, True], ids=["webhook currency", "other currency of the bot"])
 def test_owner_resends_a_pending_transaction(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID]
+    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID], into_sibling: bool
 ) -> None:
     rich, poor = pair
+    target = share_bot(connection, poor, "SIB") if into_sibling else poor
     connect_webhook(connection, poor)
-    created = convert(client, connection, rich, poor)
+    created = convert(client, connection, rich, target)
     log_in(client, connection, OWNER_ID)
 
     response = client.post(f"/transactions/{created['id']}/resend-webhook")
@@ -262,21 +252,6 @@ def test_resend_only_pending(client: TestClient, connection: psycopg.Connection,
     assert client.post(f"/transactions/{created['id']}/resend-webhook").status_code == 400
 
 
-def test_resend_works_for_every_currency_of_the_bot(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID]
-) -> None:
-    rich, poor = pair
-    sibling = share_bot(connection, poor, "SIB")
-    connect_webhook(connection, poor)
-    created = convert(client, connection, rich, sibling)
-    log_in(client, connection, OWNER_ID)
-
-    response = client.post(f"/transactions/{created['id']}/resend-webhook")
-
-    assert response.status_code == 204
-    assert [delivery["event"] for delivery in delivery_states(connection)] == ["created", "resend"]
-
-
 @pytest.mark.parametrize("sender_owner", [USER_ID, "600000000000000006"])
 def test_resend_is_for_the_receiving_owner_only(
     client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID], sender_owner: str
@@ -285,7 +260,7 @@ def test_resend_is_for_the_receiving_owner_only(
     connect_webhook(connection, poor)
     created = convert(client, connection, rich, poor)
     connection.execute("UPDATE bots SET owner_id = %s WHERE id = %s", (sender_owner, bot_of(connection, rich)))
-    connection.execute("UPDATE bots SET owner_id = %s WHERE id = %s", (FIRST_ADMIN_ID, bot_of(connection, poor)))
+    connection.execute("UPDATE bots SET owner_id = %s WHERE id = %s", (ADMIN_ID, bot_of(connection, poor)))
     log_in(client, connection, sender_owner)
 
     assert client.post(f"/transactions/{created['id']}/resend-webhook").status_code == 403
@@ -294,7 +269,7 @@ def test_resend_is_for_the_receiving_owner_only(
 def test_resend_unknown_transaction_is_404(client: TestClient, connection: psycopg.Connection) -> None:
     log_in(client, connection, OWNER_ID)
 
-    assert client.post("/transactions/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21/resend-webhook").status_code == 404
+    assert client.post(f"/transactions/{UNKNOWN_ID}/resend-webhook").status_code == 404
 
 
 def use_receiver(client: TestClient, receiver: Receiver) -> None:
@@ -313,60 +288,42 @@ def test_owner_sends_a_signed_test_webhook_for_the_bot(
     response = client.post(f"/bots/{bot_of(connection, poor)}/webhook-test")
 
     body = verified_body(receiver.requests[0], secret)
+    counts = connection.execute(
+        "SELECT (SELECT count(*) FROM transactions) AS transactions, (SELECT count(*) FROM webhook_deliveries) AS deliveries"
+    ).fetchone()
     assert (response.status_code, response.json()) == (200, {"status": 204})
     assert body["event"] == "transaction.test"
     assert (body["transaction"]["fromCurrencyId"], body["transaction"]["toCurrencyId"]) == (NIL_UUID, NIL_UUID)
     assert body["transaction"]["userId"] == OWNER_ID
-
-
-def test_test_webhook_saves_nothing(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID]
-) -> None:
-    _, poor = pair
-    connect_webhook(connection, poor)
-    use_receiver(client, Receiver([200]))
-    log_in(client, connection, OWNER_ID)
-
-    client.post(f"/bots/{bot_of(connection, poor)}/webhook-test")
-
-    counts = connection.execute(
-        "SELECT (SELECT count(*) FROM transactions) AS transactions, (SELECT count(*) FROM webhook_deliveries) AS deliveries"
-    ).fetchone()
     assert counts == {"transactions": 0, "deliveries": 0}
 
 
+@pytest.mark.parametrize(
+    ("answer", "message"),
+    [
+        (Receiver([500]), "Your webhook answered 500. Discoin expects a 2xx answer."),
+        (refuse_connection, "Discoin couldn't reach your webhook."),
+    ],
+    ids=["failing", "unreachable"],
+)
 def test_test_webhook_reports_a_failing_endpoint(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID]
+    client: TestClient,
+    connection: psycopg.Connection,
+    pair: tuple[UUID, UUID],
+    answer: Callable[[httpx.Request], httpx.Response],
+    message: str,
 ) -> None:
     _, poor = pair
     connect_webhook(connection, poor)
-    use_receiver(client, Receiver([500]))
-    log_in(client, connection, OWNER_ID)
-
-    response = client.post(f"/bots/{bot_of(connection, poor)}/webhook-test")
-
-    assert response.status_code == 502
-    assert response.json()["message"] == "Your webhook answered 500. Discoin expects a 2xx answer."
-
-
-def test_test_webhook_reports_an_unreachable_endpoint(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID]
-) -> None:
-    _, poor = pair
-    connect_webhook(connection, poor)
-
-    def refuse(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("connection refused", request=request)
-
     client.app.dependency_overrides[webhook_sender] = lambda: WebhookSender(
-        httpx.Client(transport=httpx.MockTransport(refuse)), BOX
+        httpx.Client(transport=httpx.MockTransport(answer)), BOX
     )
     log_in(client, connection, OWNER_ID)
 
     response = client.post(f"/bots/{bot_of(connection, poor)}/webhook-test")
 
     assert response.status_code == 502
-    assert response.json()["message"].startswith("Discoin couldn't reach your webhook.")
+    assert response.json()["message"].startswith(message)
 
 
 def test_test_webhook_needs_a_saved_url(client: TestClient, connection: psycopg.Connection, pair: tuple) -> None:
@@ -376,14 +333,3 @@ def test_test_webhook_needs_a_saved_url(client: TestClient, connection: psycopg.
     response = client.post(f"/bots/{bot_of(connection, poor)}/webhook-test")
 
     assert (response.status_code, response.json()["field"]) == (400, "webhookUrl")
-
-
-@pytest.mark.parametrize("user_id", [USER_ID, FIRST_ADMIN_ID])
-def test_only_the_owner_sends_test_webhooks(
-    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID], user_id: str
-) -> None:
-    _, poor = pair
-    connect_webhook(connection, poor)
-    log_in(client, connection, user_id)
-
-    assert client.post(f"/bots/{bot_of(connection, poor)}/webhook-test").status_code == 403

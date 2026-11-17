@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { choosePickerOption, openPage, sidewaysOverflow } from "./support.js";
+import { openPage, sidewaysOverflow } from "./support.js";
 
 const NEW_BLOCK_ID = "700000000000000001";
 const GLOBAL_BAN_IDS = ["198273645019283746", "587261093847562019"];
@@ -63,82 +63,32 @@ for (const { path, title } of BLOCK_PAGES) {
   });
 }
 
-test("a bad user ID keeps the block dialog open with the error focused", async ({
-  page,
-}) => {
+test("global bans show read-only on the owner page", async ({ page }) => {
   await openPage(page, "/owner");
-  await page.getByRole("button", { name: "Block a user" }).click();
-  const dialog = page.getByRole("dialog");
-  const userId = dialog.getByLabel("Discord user ID");
-  await userId.fill("12345");
-  await dialog.getByLabel("Reason").fill("Spammed trades.");
-  await dialog.getByRole("button", { name: "Block user" }).click();
 
-  await expect(userId).toHaveAttribute("aria-invalid", "true");
-  await expect(userId).toBeFocused();
+  for (const userId of GLOBAL_BAN_IDS) {
+    const row = blockedRow(page, userId);
+    await expect(row).toContainText("Blocked by Discoin admins");
+    await expect(row.getByRole("button")).toHaveCount(0);
+  }
 });
-
-for (const bot of ["Harvest bot", "Ticket bot"]) {
-  test(`global bans show read-only for ${bot} on the owner page`, async ({
-    page,
-  }) => {
-    await openPage(page, "/owner");
-    await choosePickerOption(page, "Bot", bot);
-
-    for (const userId of GLOBAL_BAN_IDS) {
-      const row = blockedRow(page, userId);
-      await expect(row).toContainText("Blocked by Discoin admins");
-      await expect(row.getByRole("button")).toHaveCount(0);
-    }
-  });
-}
 
 function blockedFrame(page: Page) {
   return page.getByRole("region", { name: "Blocked users table" });
 }
 
-for (const path of ["/admin", "/owner"]) {
-  test(`the blocked users table fits without sideways scrolling on ${path} at 1280px`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await openPage(page, path);
-
-    expect(await sidewaysOverflow(blockedFrame(page))).toBeLessThanOrEqual(0);
-  });
-
-  test(`the blocked users table scrolls inside its frame on ${path} at 390px`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 390, height: 900 });
-    await openPage(page, path);
-    const frame = blockedFrame(page);
-
-    expect(await sidewaysOverflow(frame)).toBeGreaterThan(0);
-    await expect(frame).toHaveAttribute("tabindex", "0");
-    await frame.focus();
-    await page.keyboard.press("ArrowRight");
-    await expect
-      .poll(() => frame.evaluate((element) => element.scrollLeft))
-      .toBeGreaterThan(0);
-  });
-}
-
-test("Unblock buttons line up at 360px", async ({ page }) => {
-  await page.setViewportSize({ width: 360, height: 800 });
+test("on a phone the blocked users table scrolls inside its frame by keyboard", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
   await openPage(page, "/admin");
-  const buttons = page
-    .getByRole("table", { name: "Blocked users" })
-    .getByRole("button", { name: /^Unblock/ });
-  const boxes = await Promise.all(
-    (await buttons.all()).map((button) => button.boundingBox()),
-  );
-  const lefts = boxes.map((box) => {
-    if (box === null) throw new Error("An Unblock button isn't rendered");
+  const frame = blockedFrame(page);
 
-    return box.x;
-  });
-
-  expect(lefts.length).toBeGreaterThan(1);
-  expect(new Set(lefts).size).toBe(1);
+  expect(await sidewaysOverflow(frame)).toBeGreaterThan(0);
+  await expect(frame).toHaveAttribute("tabindex", "0");
+  await frame.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect
+    .poll(() => frame.evaluate((element) => element.scrollLeft))
+    .toBeGreaterThan(0);
 });

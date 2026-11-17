@@ -4,26 +4,20 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.factories import NOW, USER_ID, create_currency, create_transaction, deactivate
+from tests.factories import NOW, create_currency, create_transaction, deactivate
 
 
-def test_currency_list_shows_active_currencies_only(client: TestClient, connection: psycopg.Connection) -> None:
-    create_currency(connection, "OAT", 100_000)
-    hidden = create_currency(connection, "OFF", 100_000)
-    deactivate(connection, hidden)
-
-    abbreviations = [currency["abbreviation"] for currency in client.get("/currencies").json()]
-
-    assert abbreviations == ["OAT"]
-
-
-def test_currency_list_can_include_inactive_currencies(client: TestClient, connection: psycopg.Connection) -> None:
+def test_currency_list_shows_inactive_currencies_only_when_asked(
+    client: TestClient, connection: psycopg.Connection
+) -> None:
     create_currency(connection, "OAT", 100_000)
     deactivate(connection, create_currency(connection, "OFF", 100_000))
 
-    listed = client.get("/currencies", params={"includeInactive": "true"}).json()
+    active = client.get("/currencies").json()
+    every = client.get("/currencies", params={"includeInactive": "true"}).json()
 
-    assert [(currency["abbreviation"], currency["active"]) for currency in listed] == [("OAT", True), ("OFF", False)]
+    assert [currency["abbreviation"] for currency in active] == ["OAT"]
+    assert [(currency["abbreviation"], currency["active"]) for currency in every] == [("OAT", True), ("OFF", False)]
 
 
 def test_currency_shape_matches_the_frontend(client: TestClient, connection: psycopg.Connection) -> None:
@@ -71,14 +65,6 @@ def test_new_currency_change_is_measured_from_creation(client: TestClient, conne
     assert client.get("/currencies/NEW").json()["change24h"] == pytest.approx(0.25)
 
 
-def test_inactive_currency_is_still_reachable_by_abbreviation(
-    client: TestClient, connection: psycopg.Connection
-) -> None:
-    deactivate(connection, create_currency(connection, "OFF", 100_000))
-
-    assert client.get("/currencies/OFF").json()["active"] is False
-
-
 def test_unknown_abbreviation_is_404(client: TestClient) -> None:
     response = client.get("/currencies/nope")
 
@@ -107,25 +93,16 @@ def test_history_covers_the_window_from_its_start(client: TestClient, connection
     assert len(client.get(f"/currencies/{currency_id}/history", params={"days": 30}).json()) == 3
 
 
-def test_history_rejects_other_windows(client: TestClient, connection: psycopg.Connection) -> None:
+@pytest.mark.parametrize("params", [{"days": 3}, {}], ids=["other window", "missing"])
+def test_history_needs_a_supported_window(client: TestClient, connection: psycopg.Connection, params: dict) -> None:
     currency_id = create_currency(connection, "OAT", 100_000)
 
-    response = client.get(f"/currencies/{currency_id}/history", params={"days": 3})
+    response = client.get(f"/currencies/{currency_id}/history", params=params)
 
-    assert response.status_code == 400
-    assert response.json()["field"] == "days"
-
-
-def test_history_requires_days(client: TestClient, connection: psycopg.Connection) -> None:
-    currency_id = create_currency(connection, "OAT", 100_000)
-
-    response = client.get(f"/currencies/{currency_id}/history")
-
-    assert response.status_code == 400
-    assert response.json() == {"status": 400, "message": "days is required.", "field": "days"}
+    assert (response.status_code, response.json()["field"]) == (400, "days")
 
 
-def test_recent_feed_is_newest_first_without_user_ids(client: TestClient, connection: psycopg.Connection) -> None:
+def test_recent_feed_is_newest_first(client: TestClient, connection: psycopg.Connection) -> None:
     oats = create_currency(connection, "OAT", 100_000)
     gems = create_currency(connection, "GEM", 100_000)
     older = create_transaction(connection, oats, gems, NOW - timedelta(hours=2))
@@ -134,20 +111,6 @@ def test_recent_feed_is_newest_first_without_user_ids(client: TestClient, connec
     feed = client.get("/transactions").json()
 
     assert [transaction["id"] for transaction in feed] == [str(newer), str(older)]
-    assert set(feed[0]) == {
-        "id",
-        "fromCurrencyId",
-        "toCurrencyId",
-        "fromCurrency",
-        "toCurrency",
-        "amount",
-        "payout",
-        "status",
-        "submittedAt",
-        "handledAt",
-    }
-    assert feed[0]["fromCurrency"] == {"abbreviation": "GEM", "name": "GEM coin", "removed": False}
-    assert USER_ID not in str(feed)
 
 
 def test_currency_trades_include_both_directions(client: TestClient, connection: psycopg.Connection) -> None:

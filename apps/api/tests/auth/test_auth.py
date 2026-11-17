@@ -1,7 +1,6 @@
 from collections.abc import Callable
 from datetime import timedelta
 from urllib.parse import parse_qs, urlsplit
-from uuid import UUID
 
 import httpx
 import psycopg
@@ -12,11 +11,12 @@ from app.auth.discord import DiscordOAuth
 from app.auth.routes import STATE_COOKIE, discord_oauth
 from app.auth.sessions import SESSION_COOKIE
 from tests.factories import (
-    FIRST_ADMIN_ID,
+    ADMIN_ID,
     FRONTEND_URL,
     NOW,
     OWNER_ID,
     USER_ID,
+    bot_name,
     bot_of,
     create_bot,
     create_botless_currency,
@@ -121,65 +121,42 @@ def test_me_needs_a_login(client: TestClient) -> None:
     assert response.json() == {"status": 401, "message": "Log in with Discord first.", "field": None}
 
 
-def test_me_rejects_an_unknown_session(client: TestClient) -> None:
+def test_me_rejects_an_unknown_or_expired_session(client: TestClient, connection: psycopg.Connection) -> None:
     client.cookies.set(SESSION_COOKIE, "made-up")
-
-    assert client.get("/me").status_code == 401
-
-
-def test_me_rejects_an_expired_session(client: TestClient, connection: psycopg.Connection) -> None:
+    unknown = client.get("/me")
     log_in(client, connection, USER_ID)
     connection.execute("UPDATE sessions SET expires_at = %s", (NOW - timedelta(seconds=1),))
+    expired = client.get("/me")
 
-    assert client.get("/me").status_code == 401
+    assert (unknown.status_code, expired.status_code) == (401, 401)
 
 
-def test_me_lists_owned_bots_with_their_currencies(client: TestClient, connection: psycopg.Connection) -> None:
+def test_me_lists_owned_live_bots_with_their_live_currencies(
+    client: TestClient, connection: psycopg.Connection
+) -> None:
     owned = create_currency(connection, "OAT", 100_000)
     bot_id = bot_of(connection, owned)
-    log_in(client, connection, OWNER_ID)
-
-    assert client.get("/me").json()["ownedBots"] == [
-        {"id": str(bot_id), "name": bot_name(connection, bot_id), "currencyIds": [str(owned)]}
-    ]
-
-
-def test_me_lists_a_bot_without_currencies(client: TestClient, connection: psycopg.Connection) -> None:
-    bot_id = create_bot(connection)
-    log_in(client, connection, OWNER_ID)
-
-    assert client.get("/me").json()["ownedBots"] == [
-        {"id": str(bot_id), "name": bot_name(connection, bot_id), "currencyIds": []}
-    ]
-
-
-def test_me_leaves_out_removed_bots_and_currencies(client: TestClient, connection: psycopg.Connection) -> None:
-    kept = create_currency(connection, "OAT", 100_000)
     removed = create_botless_currency(connection, "GEM", 100_000)
-    connection.execute("UPDATE currencies SET bot_id = %s WHERE id = %s", (bot_of(connection, kept), removed))
-    gone_bot = create_bot(connection)
-    connection.execute("UPDATE currencies SET active = false, removed_at = %s WHERE id = %s", (NOW, removed))
-    connection.execute("UPDATE bots SET removed_at = %s WHERE id = %s", (NOW, gone_bot))
+    connection.execute(
+        "UPDATE currencies SET bot_id = %s, active = false, removed_at = %s WHERE id = %s", (bot_id, NOW, removed)
+    )
+    empty_bot = create_bot(connection)
+    connection.execute("UPDATE bots SET removed_at = %s WHERE id = %s", (NOW, create_bot(connection)))
+    create_botless_currency(connection, "PBL", 100_000)
     log_in(client, connection, OWNER_ID)
 
     bots = client.get("/me").json()["ownedBots"]
 
-    assert [(bot["id"], bot["currencyIds"]) for bot in bots] == [(str(bot_of(connection, kept)), [str(kept)])]
-
-
-def test_me_ignores_botless_currencies(client: TestClient, connection: psycopg.Connection) -> None:
-    create_botless_currency(connection, "OAT", 100_000)
-    log_in(client, connection, OWNER_ID)
-
-    assert client.get("/me").json()["ownedBots"] == []
-
-
-def bot_name(connection: psycopg.Connection, bot_id: UUID) -> str:
-    return connection.execute("SELECT name FROM bots WHERE id = %s", (bot_id,)).fetchone()["name"]
+    assert sorted((bot["id"], bot["name"], bot["currencyIds"]) for bot in bots) == sorted(
+        [
+            (str(bot_id), bot_name(connection, bot_id), [str(owned)]),
+            (str(empty_bot), bot_name(connection, empty_bot), []),
+        ]
+    )
 
 
 def test_seeded_admin_is_admin_after_login(client: TestClient, connection: psycopg.Connection) -> None:
-    log_in(client, connection, FIRST_ADMIN_ID)
+    log_in(client, connection, ADMIN_ID)
 
     assert client.get("/me").json()["isAdmin"] is True
 

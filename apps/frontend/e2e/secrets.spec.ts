@@ -1,7 +1,10 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { WCAG_22_AA_TAGS, choosePickerOption, openPage } from "./support.js";
+import {
+  choosePickerOption,
+  expectWcagCompliance,
+  openPage,
+} from "./support.js";
 
 const HOOK_URL = "https://tickets-bot.example.com/discoin";
 
@@ -111,13 +114,8 @@ for (const theme of ["light", "dark"] as const) {
     await expect(
       webhookPanel(page).getByText("Copy it now. Discoin only shows it once."),
     ).toBeVisible();
-    await page.evaluate(() => document.fonts.ready);
 
-    const results = await new AxeBuilder({ page })
-      .withTags(WCAG_22_AA_TAGS)
-      .analyze();
-
-    expect(results.violations).toEqual([]);
+    await expectWcagCompliance(page);
   });
 }
 

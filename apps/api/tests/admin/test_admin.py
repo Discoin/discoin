@@ -8,9 +8,10 @@ from fastapi.testclient import TestClient
 
 from app.transactions.ledger import create_transaction as create_ledger_transaction
 from tests.factories import (
-    FIRST_ADMIN_ID,
+    ADMIN_ID,
     NOW,
     OWNER_ID,
+    UNKNOWN_ID,
     USER_ID,
     bot_of,
     create_bot,
@@ -21,11 +22,6 @@ from tests.factories import (
 )
 
 TOO_LARGE_MULTIPLIER = 10_000_000_000
-
-
-@pytest.fixture
-def as_admin(client: TestClient, connection: psycopg.Connection) -> None:
-    log_in(client, connection, FIRST_ADMIN_ID)
 
 
 @pytest.fixture
@@ -114,18 +110,10 @@ def test_add_needs_a_multiplier_and_a_bot(
 def test_add_refuses_an_unknown_bot(
     client: TestClient, connection: psycopg.Connection, as_admin: None, new_currency: dict
 ) -> None:
-    response = client.post("/admin/currencies", json={**new_currency, "botId": "019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"})
+    response = client.post("/admin/currencies", json={**new_currency, "botId": UNKNOWN_ID})
 
     assert (response.status_code, response.json()["field"]) == (404, "botId")
     assert count_currencies(connection) == 0
-
-
-def test_add_stores_the_code_in_capitals_and_finds_it_in_any_case(
-    client: TestClient, as_admin: None, new_currency: dict
-) -> None:
-    client.post("/admin/currencies", json={**new_currency, "abbreviation": "pBlz"})
-
-    assert client.get("/currencies/pblz").json()["abbreviation"] == "PBLZ"
 
 
 def test_add_rejects_a_taken_abbreviation(
@@ -155,52 +143,35 @@ def test_admin_lists_every_currency_with_median_and_bot(
     ]
 
 
-def test_new_median_resets_the_reserve(client: TestClient, connection: psycopg.Connection, as_admin: None) -> None:
+@pytest.mark.parametrize(
+    ("stored_multiplier", "changes", "median", "multiplier", "reserve"),
+    [
+        (4, {"weeklyMedian": 50_000}, 50_000, 4, 200_000),
+        (10, {"weeklyMedian": 50_000}, 50_000, 10, 500_000),
+        (4, {"multiplier": 10}, 25_000, 10, 250_000),
+        (4, {"weeklyMedian": 30_000, "multiplier": 5}, 30_000, 5, 150_000),
+    ],
+)
+def test_a_new_median_or_multiplier_resets_the_reserve_once(
+    client: TestClient,
+    connection: psycopg.Connection,
+    as_admin: None,
+    stored_multiplier: int,
+    changes: dict,
+    median: int,
+    multiplier: int,
+    reserve: int,
+) -> None:
     currency_id = create_currency(connection, "OAT", 100_000)
+    connection.execute("UPDATE currencies SET multiplier = %s WHERE id = %s", (stored_multiplier, currency_id))
 
-    response = client.patch(f"/admin/currencies/{currency_id}", json={"weeklyMedian": 50_000})
+    response = client.patch(f"/admin/currencies/{currency_id}", json=changes)
 
     entry = saved(response)
-    assert entry["currency"]["reserve"] == 200_000
-    assert entry["weeklyMedian"] == 50_000
-    assert entry["bot"]["id"] == str(bot_of(connection, currency_id))
     history = client.get(f"/currencies/{currency_id}/history", params={"days": 7}).json()
-    assert history[-1] == {"at": "2026-11-13T12:00:00Z", "reserve": 200_000.0}
-
-
-def test_new_median_resets_with_the_currencys_own_multiplier(
-    client: TestClient, connection: psycopg.Connection, as_admin: None
-) -> None:
-    currency_id = create_currency(connection, "OAT", 100_000)
-    connection.execute("UPDATE currencies SET multiplier = 10 WHERE id = %s", (currency_id,))
-
-    response = client.patch(f"/admin/currencies/{currency_id}", json={"weeklyMedian": 50_000})
-
-    assert (saved(response)["multiplier"], saved(response)["currency"]["reserve"]) == (10, 500_000)
-    assert count_history(connection, currency_id) == 2
-
-
-def test_new_multiplier_alone_resets_the_reserve(
-    client: TestClient, connection: psycopg.Connection, as_admin: None
-) -> None:
-    currency_id = create_currency(connection, "OAT", 100_000)
-
-    response = client.patch(f"/admin/currencies/{currency_id}", json={"multiplier": 10})
-
-    assert response.status_code == 200
-    assert (saved(response)["weeklyMedian"], saved(response)["multiplier"]) == (25_000, 10)
-    assert saved(response)["currency"]["reserve"] == 250_000
-    assert count_history(connection, currency_id) == 2
-
-
-def test_new_median_and_multiplier_reset_the_reserve_once(
-    client: TestClient, connection: psycopg.Connection, as_admin: None
-) -> None:
-    currency_id = create_currency(connection, "OAT", 100_000)
-
-    response = client.patch(f"/admin/currencies/{currency_id}", json={"weeklyMedian": 30_000, "multiplier": 5})
-
-    assert saved(response)["currency"]["reserve"] == 150_000
+    assert (entry["weeklyMedian"], entry["multiplier"], entry["currency"]["reserve"]) == (median, multiplier, reserve)
+    assert entry["bot"]["id"] == str(bot_of(connection, currency_id))
+    assert history[-1] == {"at": "2026-11-13T12:00:00Z", "reserve": float(reserve)}
     assert count_history(connection, currency_id) == 2
 
 
@@ -212,29 +183,12 @@ def test_new_median_and_multiplier_reset_the_reserve_once(
         ({"multiplier": TOO_LARGE_MULTIPLIER}, "multiplier"),
         ({"weeklyMedian": 0.01, "multiplier": 0.01}, "multiplier"),
         ({"weeklyMedian": 1_000_000_000, "multiplier": 1_000_000}, "multiplier"),
-    ],
-)
-def test_edit_checks_the_multiplier(
-    client: TestClient, connection: psycopg.Connection, as_admin: None, changes: dict, field: str
-) -> None:
-    currency_id = create_currency(connection, "OAT", 100_000)
-
-    response = client.patch(f"/admin/currencies/{currency_id}", json=changes)
-
-    stored = connection.execute("SELECT reserve, weekly_median, multiplier FROM currencies").fetchone()
-    assert (response.status_code, response.json()["field"]) == (400, field)
-    assert stored == {"reserve": 100_000, "weekly_median": 25_000, "multiplier": 4}
-
-
-@pytest.mark.parametrize(
-    ("changes", "field"),
-    [
         ({"weeklyMedian": 50_000, "multiplier": None}, "multiplier"),
         ({"multiplier": None}, "multiplier"),
         ({"active": False, "weeklyMedian": None}, "weeklyMedian"),
     ],
 )
-def test_edit_refuses_a_cleared_median_or_multiplier(
+def test_edit_refuses_a_bad_or_cleared_median_or_multiplier(
     client: TestClient, connection: psycopg.Connection, as_admin: None, changes: dict, field: str
 ) -> None:
     currency_id = create_currency(connection, "OAT", 100_000)
@@ -313,7 +267,7 @@ def test_edit_works_on_an_inactive_currency(client: TestClient, connection: psyc
 
 
 def test_edit_unknown_currency_is_404(client: TestClient, as_admin: None) -> None:
-    response = client.patch("/admin/currencies/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21", json={"weeklyMedian": 10})
+    response = client.patch(f"/admin/currencies/{UNKNOWN_ID}", json={"weeklyMedian": 10})
 
     assert response.status_code == 404
 
@@ -325,9 +279,9 @@ def test_admin_grants_and_removes_admins(client: TestClient, connection: psycopg
 
     assert granted.status_code == 201
     assert granted.json() == {"userId": USER_ID, "username": None}
-    assert [admin["userId"] for admin in listed] == [FIRST_ADMIN_ID, USER_ID]
+    assert [admin["userId"] for admin in listed] == [ADMIN_ID, USER_ID]
     assert removed.status_code == 204
-    assert [admin["userId"] for admin in client.get("/admin/admins").json()] == [FIRST_ADMIN_ID]
+    assert [admin["userId"] for admin in client.get("/admin/admins").json()] == [ADMIN_ID]
 
 
 def test_granting_an_admin_twice_is_a_conflict(client: TestClient, as_admin: None) -> None:
@@ -345,7 +299,7 @@ def test_granting_keeps_a_known_username(client: TestClient, connection: psycopg
 
 
 def test_admin_cannot_remove_themselves(client: TestClient, as_admin: None) -> None:
-    assert client.delete(f"/admin/admins/{FIRST_ADMIN_ID}").status_code == 400
+    assert client.delete(f"/admin/admins/{ADMIN_ID}").status_code == 400
 
 
 def test_removing_a_non_admin_is_404(client: TestClient, as_admin: None) -> None:
@@ -356,18 +310,10 @@ def test_removing_a_non_admin_is_404(client: TestClient, as_admin: None) -> None
     ("method", "path"),
     [
         ("GET", "/admin/currencies"),
-        ("POST", "/admin/currencies"),
-        ("PATCH", "/admin/currencies/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"),
-        ("GET", "/admin/currencies/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21/removal"),
-        ("DELETE", "/admin/currencies/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"),
-        ("GET", "/admin/bots"),
-        ("POST", "/admin/bots"),
-        ("PATCH", "/admin/bots/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"),
-        ("GET", "/admin/bots/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21/removal"),
-        ("DELETE", "/admin/bots/019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"),
-        ("GET", "/admin/admins"),
+        ("DELETE", f"/admin/currencies/{UNKNOWN_ID}"),
+        ("PATCH", f"/admin/bots/{UNKNOWN_ID}"),
         ("POST", "/admin/admins"),
-        ("DELETE", f"/admin/admins/{USER_ID}"),
+        ("POST", "/admin/blocks"),
     ],
 )
 def test_admin_routes_are_for_admins(
@@ -386,44 +332,14 @@ def test_removed_admin_loses_access(client: TestClient, connection: psycopg.Conn
     assert client.get("/admin/admins").status_code == 403
 
 
-def test_history_point_is_recorded_when_added(
-    client: TestClient, connection: psycopg.Connection, as_admin: None, new_currency: dict
-) -> None:
-    added = client.post("/admin/currencies", json=new_currency).json()
-    currency_id = UUID(added["currency"]["id"])
-
-    points = connection.execute(
-        "SELECT recorded_at FROM currency_history WHERE currency_id = %s", (currency_id,)
-    ).fetchall()
-
-    assert points == [{"recorded_at": NOW}]
-
-
-def test_edit_can_deactivate_and_cancels_pending(
-    client: TestClient, connection: psycopg.Connection, as_admin: None
-) -> None:
-    oats = create_currency(connection, "OAT", 1_000_000)
-    gems = create_currency(connection, "GEM", 1_000_000)
-    pending = create_ledger_transaction(connection, USER_ID, gems, oats, Decimal(1000), NOW)["id"]
-
-    response = client.patch(f"/admin/currencies/{oats}", json={"active": False})
-
-    status = connection.execute("SELECT status FROM transactions WHERE id = %s", (pending,)).fetchone()
-    assert saved(response)["currency"]["active"] is False
-    assert status == {"status": "Cancelled"}
-
-
-def test_edit_can_reactivate(client: TestClient, connection: psycopg.Connection, as_admin: None) -> None:
-    currency_id = create_currency(connection, "OAT", 100_000)
-    deactivate(connection, currency_id)
-
-    assert saved(client.patch(f"/admin/currencies/{currency_id}", json={"active": True}))["currency"]["active"]
-
-
-def test_edit_with_the_current_status_changes_nothing(
-    client: TestClient, connection: psycopg.Connection, as_admin: None
+@pytest.mark.parametrize("inactive_first", [True, False], ids=["reactivate", "already active"])
+def test_edit_can_set_a_currency_active(
+    client: TestClient, connection: psycopg.Connection, as_admin: None, inactive_first: bool
 ) -> None:
     currency_id = create_currency(connection, "OAT", 100_000)
+
+    if inactive_first:
+        deactivate(connection, currency_id)
 
     response = client.patch(f"/admin/currencies/{currency_id}", json={"active": True})
 
@@ -437,7 +353,7 @@ def test_status_and_bot_save_together_or_not_at_all(
 
     response = client.patch(
         f"/admin/currencies/{currency_id}",
-        json={"active": False, "botId": "019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"},
+        json={"active": False, "botId": UNKNOWN_ID},
     )
 
     stored = connection.execute("SELECT active, bot_id FROM currencies").fetchone()

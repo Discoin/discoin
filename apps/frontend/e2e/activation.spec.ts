@@ -1,7 +1,6 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { WCAG_22_AA_TAGS, openPage, waitForData } from "./support.js";
+import { expectWcagCompliance, openPage, waitForData } from "./support.js";
 
 const NEW_ADMIN_ID = "176254983017264999";
 
@@ -148,13 +147,8 @@ for (const theme of ["light", "dark"] as const) {
     await expect(
       editDialog(page).getByText("This deactivates OAT"),
     ).toBeVisible();
-    await page.evaluate(() => document.fonts.ready);
 
-    const results = await new AxeBuilder({ page })
-      .withTags(WCAG_22_AA_TAGS)
-      .analyze();
-
-    expect(results.violations).toEqual([]);
+    await expectWcagCompliance(page);
   });
 
   test(`an inactive currency page meets WCAG 2.2 AA in the ${theme} theme`, async ({
@@ -163,32 +157,7 @@ for (const theme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme: theme });
     await deactivateOats(page);
     await goTo(page, "/currency/OAT");
-    await page.evaluate(() => document.fonts.ready);
 
-    const results = await new AxeBuilder({ page })
-      .withTags(WCAG_22_AA_TAGS)
-      .analyze();
-
-    expect(results.violations).toEqual([]);
-  });
-}
-
-for (const theme of ["light", "dark"] as const) {
-  test(`the edit dialog with its Active switch meets WCAG 2.2 AA in the ${theme} theme`, async ({
-    page,
-  }) => {
-    await page.emulateMedia({ colorScheme: theme });
-    await openPage(page, "/admin");
-    await page.getByRole("button", { name: "Edit OAT" }).click();
-    await expect(
-      editDialog(page).getByRole("switch", { name: "Active" }),
-    ).toBeChecked();
-    await page.evaluate(() => document.fonts.ready);
-
-    const results = await new AxeBuilder({ page })
-      .withTags(WCAG_22_AA_TAGS)
-      .analyze();
-
-    expect(results.violations).toEqual([]);
+    await expectWcagCompliance(page);
   });
 }

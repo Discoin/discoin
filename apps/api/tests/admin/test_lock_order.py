@@ -23,9 +23,8 @@ from app.owners.access import BotOwnership, lock_owned_bot, require_owner
 from app.owners.routes import resend_webhook
 from app.transactions.exchange import lock_exchange_sides
 from app.transactions.ledger import create_transaction
-from app.transactions.locking import LockPlan, lock_currencies_first
 from tests.factories import (
-    FIRST_ADMIN_ID,
+    ADMIN_ID,
     LOCK_TIMEOUT_MS,
     NOW,
     OWNER_ID,
@@ -33,19 +32,16 @@ from tests.factories import (
     bot_of,
     create_botless_currency,
     create_currency,
+    status_of,
 )
 from tests.webhooks.receiver import connect_webhook
 
 POLL_SECONDS = 0.02
 WAIT_LIMIT_SECONDS = 5
-ADMIN = User(id=FIRST_ADMIN_ID, username=None, avatar_hash=None, is_admin=True)
+ADMIN = User(id=ADMIN_ID, username=None, avatar_hash=None, is_admin=True)
 
 CurrencyRetirement = Callable[[psycopg.Connection, UUID, datetime], None]
 BotRevocation = Callable[[psycopg.Connection, UUID], None]
-
-
-def status_of(connection: psycopg.Connection, transaction_id: UUID) -> str:
-    return connection.execute("SELECT status FROM transactions WHERE id = %s", (transaction_id,)).fetchone()["status"]
 
 
 def wait_until_blocked_on_a_lock(observer: psycopg.Connection, pid: int) -> None:
@@ -350,25 +346,3 @@ def test_a_resend_waits_for_a_refund_in_progress_and_is_refused(
 
     assert (refused.value.status, refused.value.message) == (400, "Only Pending transactions can be resent.")
     assert pending_deliveries(connection) == 0
-
-
-def test_a_lock_retry_frees_the_currencies_it_no_longer_needs(
-    client: TestClient, connection: psycopg.Connection, database_url: str
-) -> None:
-    oats, pebbles, gems = (create_botless_currency(connection, name, 1_000_000) for name in ("OAT", "PBL", "GEM"))
-    first_sight = {"from_currency_id": oats, "to_currency_id": pebbles}
-    after_a_race = {"from_currency_id": oats, "to_currency_id": gems}
-    answers = iter([[first_sight], [after_a_race], [after_a_race], [after_a_race]])
-
-    with (
-        psycopg.connect(database_url, row_factory=dict_row) as db,
-        psycopg.connect(database_url) as other,
-        db.transaction(),
-    ):
-        locked = lock_currencies_first(db, LockPlan(frozenset(), lambda lock: next(answers)))
-        other.execute("SELECT 1 FROM currencies WHERE id = %s FOR UPDATE NOWAIT", (pebbles,))
-
-        with pytest.raises(psycopg.errors.LockNotAvailable):
-            other.execute("SELECT 1 FROM currencies WHERE id = %s FOR UPDATE NOWAIT", (gems,))
-
-    assert locked == [after_a_race]

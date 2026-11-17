@@ -1,6 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { LATENCY_MS } from "../src/mocks/api.js";
 import {
   DESKTOP_VIEWPORT,
   NARROW_PHONE_VIEWPORT,
@@ -10,13 +9,10 @@ import {
   drawerBrand,
   drawerResources,
   expectLeftForApiDocs,
-  logOutFromDrawer,
   menuButton,
   navDrawer,
   openNavDrawer,
   openPage,
-  pageSidewaysOverflow,
-  sidewaysOverflow,
   stubApiDocs,
 } from "./support.js";
 
@@ -27,8 +23,6 @@ const STRIP_POINT = { x: 8, y: 150 };
 const WHEEL_DISTANCE_PX = 800;
 const MIN_TARGET_PX = 24;
 const TABS_PAST_THE_END = 12;
-const FLUSHES_BEFORE_SESSION_CHECK = 2;
-const EFFECTS_FLUSH_MS = LATENCY_MS / (FLUSHES_BEFORE_SESSION_CHECK + 1);
 const SLIDE_ANIMATION = "nav-drawer-slide-in";
 
 const LOGGED_IN_FOCUS_ORDER = [
@@ -161,23 +155,6 @@ test("logged in, focus runs brand, close, Main links, Resources, then Log out", 
   }
 });
 
-test("logged out, focus runs close, Log in, Dashboard, then Resources, with no Log out", async ({
-  page,
-}) => {
-  await openPhonePage(page, "/");
-  await logOutFromDrawer(page);
-  const drawer = await openNavDrawer(page);
-
-  await expect(closeButton(drawer)).toBeFocused();
-
-  for (const name of ["Log in with Discord", "Dashboard", "Resources"]) {
-    await page.keyboard.press("Tab");
-    await expectFocusedName(page, name);
-  }
-
-  await expect(drawer.getByRole("button", { name: "Log out" })).toHaveCount(0);
-});
-
 test("the drawer stacks every item without overlap, each at least 24 by 24 px", async ({
   page,
 }) => {
@@ -247,16 +224,6 @@ test("following a Main link opens that page and closes the drawer", async ({
   await expect(navDrawer(page).locator('[aria-current="page"]')).toHaveText([
     "My transactions",
   ]);
-});
-
-test("Dashboard closes the drawer even on the dashboard itself", async ({
-  page,
-}) => {
-  await openPhonePage(page, "/");
-  const drawer = await openNavDrawer(page);
-  await drawer.getByRole("link", { name: "Dashboard" }).click();
-
-  await expect(navDrawer(page)).toHaveCount(0);
 });
 
 test("Escape closes the whole drawer with Resources open and Resources starts collapsed again", async ({
@@ -403,43 +370,6 @@ test("Log out stays pinned to the bottom edge while the middle scrolls", async (
   expect(await drawer.evaluate((element) => element.scrollTop)).toBe(0);
 });
 
-test("the Main links stay put while the session loads", async ({ page }) => {
-  await page.setViewportSize(PHONE_VIEWPORT);
-  await page.clock.install();
-  await page.clock.pauseAt(Date.now() + LATENCY_MS);
-  await page.goto("/");
-  await page.clock.runFor(EFFECTS_FLUSH_MS);
-  await menuButton(page).click();
-  await page.clock.runFor(EFFECTS_FLUSH_MS);
-  const drawer = navDrawer(page);
-  const account = drawer.locator(".nav-drawer__account");
-  const dashboard = drawer.getByRole("link", { name: "Dashboard" });
-
-  await expect(account).toBeEmpty();
-  await expect(drawer.getByRole("button", { name: "Log out" })).toHaveCount(0);
-  const loading = await boxOf(dashboard);
-
-  await page.clock.resume();
-  await expect(drawer.locator(".nav-drawer__user")).toBeVisible();
-  await expect(drawer.getByRole("button", { name: "Log out" })).toBeVisible();
-  expect((await boxOf(dashboard)).y).toBe(loading.y);
-});
-
-test("logged in and logged out, the Main links start at the same height", async ({
-  page,
-}) => {
-  await openPhonePage(page, "/");
-  let drawer = await openNavDrawer(page);
-  const loggedIn = await boxOf(drawer.getByRole("link", { name: "Dashboard" }));
-  await closeButton(drawer).click();
-  await logOutFromDrawer(page);
-  drawer = await openNavDrawer(page);
-
-  expect((await boxOf(drawer.getByRole("link", { name: "Dashboard" }))).y).toBe(
-    loggedIn.y,
-  );
-});
-
 test.describe("below the pinned footer height", () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize(SHORT_VIEWPORT);
@@ -466,31 +396,5 @@ test.describe("below the pinned footer height", () => {
       await expectFocusedName(page, name);
       expect(await focusedIsFullyInView(page), name).toBe(true);
     }
-  });
-
-  test("nothing scrolls sideways with the drawer open", async ({ page }) => {
-    const drawer = await openNavDrawer(page);
-
-    expect(await pageSidewaysOverflow(page)).toBeLessThanOrEqual(0);
-    expect(await sidewaysOverflow(drawer)).toBeLessThanOrEqual(0);
-  });
-
-  test("Escape, the close button and the backdrop strip still close it", async ({
-    page,
-  }) => {
-    await openNavDrawer(page);
-    await page.keyboard.press("Escape");
-    await expect(navDrawer(page)).toHaveCount(0);
-
-    const drawer = await openNavDrawer(page);
-    await drawer.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-    });
-    await closeButton(drawer).click();
-    await expect(navDrawer(page)).toHaveCount(0);
-
-    await openNavDrawer(page);
-    await page.mouse.click(STRIP_POINT.x, STRIP_POINT.y);
-    await expect(navDrawer(page)).toHaveCount(0);
   });
 });

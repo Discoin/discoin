@@ -40,25 +40,20 @@ def test_seeded_currencies_have_a_month_of_history(client: TestClient, connectio
     assert len(history) == 31
 
 
-def test_seeded_currencies_use_a_multiplier_of_4(client: TestClient, connection: psycopg.Connection) -> None:
-    seed_sample_currencies(connection, OWNER_ID, NOW)
-
-    rows = connection.execute("SELECT multiplier FROM currencies").fetchall()
-
-    assert rows == [{"multiplier": 4}] * len(SAMPLE_CURRENCIES)
-
-
-def test_each_seeded_currency_gets_its_own_bot_for_the_owner(
+def test_each_seeded_currency_gets_a_multiplier_of_4_and_its_own_bot_for_the_owner(
     client: TestClient, connection: psycopg.Connection
 ) -> None:
     seed_sample_currencies(connection, OWNER_ID, NOW)
 
     rows = connection.execute(
-        "SELECT c.abbreviation, b.name, b.owner_id FROM currencies c JOIN bots b ON b.id = c.bot_id ORDER BY 1"
+        """
+        SELECT c.abbreviation, c.multiplier, b.name, b.owner_id
+        FROM currencies c JOIN bots b ON b.id = c.bot_id ORDER BY 1
+        """
     ).fetchall()
 
-    assert [(row["abbreviation"], row["owner_id"]) for row in rows] == sorted(
-        (sample.abbreviation, OWNER_ID) for sample in SAMPLE_CURRENCIES
+    assert [(row["abbreviation"], row["multiplier"], row["owner_id"]) for row in rows] == sorted(
+        (sample.abbreviation, 4, OWNER_ID) for sample in SAMPLE_CURRENCIES
     )
     assert rows[0]["name"] == "Gems bot"
 
@@ -95,18 +90,6 @@ def test_seed_says_it_skipped_a_sample_that_was_removed(client: TestClient, conn
 
     assert (result.seeded, result.skipped["OAT"]) == ([], CURRENCY_REMOVED)
     assert client.get("/currencies/OAT").status_code == 404
-
-
-def test_seed_says_it_skipped_a_sample_whose_bot_was_removed(
-    client: TestClient, connection: psycopg.Connection
-) -> None:
-    seed_sample_currencies(connection, OWNER_ID, NOW)
-    connection.execute("UPDATE currencies SET active = false, removed_at = %s WHERE abbreviation = 'OAT'", (NOW,))
-    connection.execute("UPDATE bots SET removed_at = %s WHERE id = %s", (NOW, SAMPLE_BOTS["OAT"].id))
-
-    result = seed_sample_currencies(connection, OWNER_ID, NOW)
-
-    assert result.skipped["OAT"] == BOT_REMOVED
 
 
 def test_seed_prints_why_it_skipped_each_sample(

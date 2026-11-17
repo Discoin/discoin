@@ -5,7 +5,6 @@ from urllib.parse import urlsplit
 from app.core.validation import DISCORD_ID_PATTERN
 
 FIRST_ADMIN_IDS = "FIRST_ADMIN_IDS"
-RENAMED_FIRST_ADMIN_ID = "FIRST_ADMIN_ID"
 LIST_SEPARATOR = ","
 ENTRY_PADDING = " \t"
 DISCORD_ID_LIST_EXPECTATION = "a comma separated list of Discord user IDs of 17 to 20 digits"
@@ -43,7 +42,7 @@ class Settings:
     def from_environment(cls) -> Settings:
         return cls(
             database_url=require_environment_variable("DATABASE_URL"),
-            first_admin_ids=require_first_admin_ids(),
+            first_admin_ids=require_discord_id_list(FIRST_ADMIN_IDS),
             discord_client_id=require_environment_variable("DISCORD_CLIENT_ID"),
             discord_client_secret=require_environment_variable("DISCORD_CLIENT_SECRET"),
             discord_redirect_uri=require_url("DISCORD_REDIRECT_URI"),
@@ -66,13 +65,6 @@ def require_discord_id(name: str) -> str:
         raise InvalidSettingError(name, "a Discord user ID of 17 to 20 digits")
 
     return value
-
-
-def require_first_admin_ids() -> tuple[str, ...]:
-    if RENAMED_FIRST_ADMIN_ID in os.environ:
-        raise InvalidSettingError(RENAMED_FIRST_ADMIN_ID, f"removed, it was renamed to {FIRST_ADMIN_IDS}")
-
-    return require_discord_id_list(FIRST_ADMIN_IDS)
 
 
 def require_discord_id_list(name: str) -> tuple[str, ...]:

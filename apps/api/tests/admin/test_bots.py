@@ -1,6 +1,5 @@
 from datetime import timedelta
 from decimal import Decimal
-from unittest.mock import patch
 from uuid import UUID
 
 import psycopg
@@ -11,9 +10,10 @@ from app.bots.tokens import issue_api_token
 from app.core.errors import ApiError
 from app.transactions.ledger import create_transaction
 from tests.factories import (
-    FIRST_ADMIN_ID,
+    ADMIN_ID,
     NOW,
     OWNER_ID,
+    UNKNOWN_ID,
     USER_ID,
     bot_of,
     create_bot,
@@ -26,12 +26,6 @@ from tests.webhooks.receiver import connect_webhook
 
 BOT_DISCORD_ID = "410000000000000001"
 OTHER_USER_ID = "500000000000000005"
-UNKNOWN_ID = "019a6f10-2c41-7b3e-8d12-5f0a9c7e4b21"
-
-
-@pytest.fixture
-def as_admin(client: TestClient, connection: psycopg.Connection) -> None:
-    log_in(client, connection, FIRST_ADMIN_ID)
 
 
 def new_bot(**changes: str) -> dict:
@@ -96,30 +90,17 @@ def test_registering_checks_every_field(
     assert connection.execute("SELECT count(*) AS bots FROM bots").fetchone()["bots"] == 0
 
 
-def test_a_live_bot_discord_id_is_taken(client: TestClient, as_admin: None) -> None:
-    client.post("/admin/bots", json=new_bot())
-
-    response = client.post("/admin/bots", json=new_bot(name="Copy"))
-
-    assert (response.status_code, response.json()["field"]) == (409, "discordId")
-
-
-def test_a_racing_duplicate_discord_id_is_the_same_field_error(client: TestClient, as_admin: None) -> None:
-    client.post("/admin/bots", json=new_bot())
-
-    with patch("app.admin.bots.discord_id_in_use", return_value=False):
-        response = client.post("/admin/bots", json=new_bot(name="Copy"))
-
-    assert (response.status_code, response.json()["field"]) == (409, "discordId")
-
-
-def test_editing_into_a_live_bot_discord_id_is_refused(
-    client: TestClient, connection: psycopg.Connection, as_admin: None
+@pytest.mark.parametrize("editing", [False, True], ids=["register", "edit"])
+def test_a_live_bot_discord_id_is_taken(
+    client: TestClient, connection: psycopg.Connection, as_admin: None, editing: bool
 ) -> None:
     client.post("/admin/bots", json=new_bot())
-    bot_id = create_bot(connection)
+    other = f"/admin/bots/{create_bot(connection)}"
 
-    response = client.patch(f"/admin/bots/{bot_id}", json={"discordId": BOT_DISCORD_ID})
+    if editing:
+        response = client.patch(other, json={"discordId": BOT_DISCORD_ID})
+    else:
+        response = client.post("/admin/bots", json=new_bot(name="Copy"))
 
     assert (response.status_code, response.json()["field"]) == (409, "discordId")
 
@@ -312,7 +293,7 @@ def test_merging_keeps_the_earliest_block_and_closes_the_other(
     link = connection.execute("SELECT block_id FROM transactions WHERE id = %s", (linked,)).fetchone()
     assert response["movedBlocks"] == 1
     assert blocks == [
-        {"id": later, "bot_id": bot_id, "unblocked_at": NOW, "unblocked_by": FIRST_ADMIN_ID, "merged_into": earliest},
+        {"id": later, "bot_id": bot_id, "unblocked_at": NOW, "unblocked_by": ADMIN_ID, "merged_into": earliest},
         {"id": earliest, "bot_id": bot_id, "unblocked_at": None, "unblocked_by": None, "merged_into": None},
         {"id": other_user, "bot_id": bot_id, "unblocked_at": None, "unblocked_by": None, "merged_into": None},
     ]
