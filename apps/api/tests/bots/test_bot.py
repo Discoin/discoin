@@ -116,7 +116,7 @@ def test_create_rejects_a_source_the_bot_does_not_run(
 
 
 @pytest.mark.parametrize(
-    ("currency", "status"), [("missing", 400), ("unknown", 404), ("removed", 404), ("another bot's", 403)]
+    ("currency", "status"), [("malformed", 400), ("unknown", 404), ("removed", 404), ("another bot's", 403)]
 )
 def test_pending_needs_one_of_the_bots_live_currencies(
     client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID], currency: str, status: int
@@ -124,7 +124,7 @@ def test_pending_needs_one_of_the_bots_live_currencies(
     rich, poor = pair
     headers = bot_headers(connection, rich)
     params = {
-        "missing": {},
+        "malformed": {"currencyId": "nope"},
         "unknown": {"currencyId": UNKNOWN_ID},
         "removed": {"currencyId": str(rich)},
         "another bot's": {"currencyId": str(poor)},
@@ -154,6 +154,8 @@ def test_a_bot_with_several_currencies_uses_each_of_them(
     assert (from_rich["fromCurrencyId"], from_gems["fromCurrencyId"]) == (str(rich), str(gems))
     assert [row["id"] for row in pending_into(client, headers, rich)["body"]] == [into_rich["id"]]
     assert [row["id"] for row in pending_into(client, headers, gems)["body"]] == [into_gems["id"]]
+    every_currency = client.get("/transactions/pending", headers=headers).json()
+    assert sorted(row["id"] for row in every_currency) == sorted([into_rich["id"], into_gems["id"]])
     completed = client.patch(f"/transactions/{into_gems['id']}", headers=headers, json={"status": "Completed"})
     assert completed.json()["status"] == "Completed"
 

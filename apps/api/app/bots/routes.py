@@ -15,7 +15,11 @@ from app.core.validation import checked_discord_id
 from app.transactions.exchange import lock_exchange_sides, unknown_currency
 from app.transactions.ledger import create_transaction, undo_transaction
 from app.transactions.models import BotTransaction
-from app.transactions.queries import list_pending_into_currency, returning_with_currencies
+from app.transactions.queries import (
+    list_pending_into_bot,
+    list_pending_into_currency,
+    returning_with_currencies,
+)
 
 router = APIRouter(prefix="/transactions", tags=["bots"])
 
@@ -53,8 +57,11 @@ def post_transaction(body: NewTransaction, bot: CallingBotId, db: Database, now:
 
 @router.get("/pending")
 def get_pending_transactions(
-    bot: CallingBotId, currency_id: Annotated[UUID, Query(alias="currencyId")], db: Database
+    bot: CallingBotId, currency_id: Annotated[UUID | None, Query(alias="currencyId")], db: Database
 ) -> list[BotTransaction]:
+    if currency_id is None:
+        return list_pending_into_bot(db, bot)
+
     return list_pending_into_currency(db, require_bot_currency(db, BotCurrency(bot, currency_id, "currencyId")))
 
 

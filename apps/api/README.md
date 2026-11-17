@@ -77,8 +77,8 @@ Tell every bot integrator what changes for them:
 
 1. Their old API token stops working. They generate a new one on the Bot owner page, once an admin has registered their bot.
 2. `POST /transactions` now needs `fromCurrencyId`, the bot's own currency the user converts from, next to `toCurrencyId`.
-3. `GET /transactions/pending` now needs `?currencyId=`, the bot's own currency to list.
-4. A bot with several currencies uses one token and one webhook for all of them, and names the currency on every request.
+3. `GET /transactions/pending` takes an optional `?currencyId=`, the bot's own currency to list. Without it, the list covers all of the bot's currencies.
+4. A bot with several currencies uses one token and one webhook for all of them, and names the currency when it creates a transaction.
 
 ## Conventions
 
@@ -105,12 +105,12 @@ A bot is a name, its Discord bot user ID and the Discord ID of its one owner. Ad
 - An owner block covers every currency of the bot. A blocked user can't convert into or out of any of them. Blocking cancels the user's Pending transactions into or out of any of the bot's currencies, and can reverse Completed ones: incoming means into one of the bot's currencies, outgoing means out of one, and both means either.
 - A block made on a currency before it had a bot keeps applying to that currency until an admin assigns its bot, and then moves to the bot.
 
-Bots send `Authorization: Bearer <token>`. The token identifies the bot, never a currency, so every request names the bot's own currency it acts for, even when the bot runs only one. The owner page shows the token once when it is generated, and only its hash is stored.
+Bots send `Authorization: Bearer <token>`. The token identifies the bot, never a currency, so creating a transaction names the bot's own currency it converts from, even when the bot runs only one. The owner page shows the token once when it is generated, and only its hash is stored.
 
 - `POST /transactions` with `{userId, fromCurrencyId, toCurrencyId, amount}` converts from `fromCurrencyId`, which must be one of the bot's currencies.
-- `GET /transactions/pending?currencyId=<id>` lists Pending transactions into that currency, which must be one of the bot's currencies.
+- `GET /transactions/pending` lists Pending transactions into any of the bot's currencies. Add `?currencyId=<id>` to list only that currency, which must be one of the bot's currencies.
 - `PATCH /transactions/{id}` with `{status: "Completed" | "Refunded"}` settles one whose destination is one of the bot's currencies. A refund runs the payout back through the curve.
-- A missing `fromCurrencyId` or `currencyId` is a 400 on that field, a currency that doesn't exist or was removed is a 404, and a currency of another bot, or of no bot, is a 403. A PATCH on a transaction into another bot's currency is a 403.
+- A missing `fromCurrencyId` or a malformed `currencyId` is a 400 on that field, a currency that doesn't exist or was removed is a 404, and a currency of another bot, or of no bot, is a 403. A PATCH on a transaction into another bot's currency is a 403.
 - A removed bot's token fails with the same 401 as an invalid token.
 
 ## Removing bots and currencies
