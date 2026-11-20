@@ -1,4 +1,4 @@
-import { createHttpApi } from "./http.js";
+import { createApi } from "virtual:api-implementation";
 import type {
   AdminBot,
   AdminCurrency,
@@ -101,18 +101,4 @@ export interface DiscoinApi {
 
 export const LOGIN_PATH = "/api/auth/discord/login";
 
-async function createApi(): Promise<DiscoinApi> {
-  if (import.meta.env.VITE_API_MODE === "http") return createHttpApi();
-
-  if (import.meta.env.VITE_API_MODE === "mock") {
-    const { createMockApi } = await import("../mocks/api.js");
-
-    return createMockApi();
-  }
-
-  throw new Error(
-    `Build with --mode http or --mode mock to pick the API. Got "${import.meta.env.VITE_API_MODE}".`,
-  );
-}
-
-export const api: DiscoinApi = await createApi();
+export const api: DiscoinApi = createApi();

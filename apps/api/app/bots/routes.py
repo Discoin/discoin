@@ -57,7 +57,7 @@ def post_transaction(body: NewTransaction, bot: CallingBotId, db: Database, now:
 
 @router.get("/pending")
 def get_pending_transactions(
-    bot: CallingBotId, currency_id: Annotated[UUID | None, Query(alias="currencyId")], db: Database
+    bot: CallingBotId, db: Database, currency_id: Annotated[UUID | None, Query(alias="currencyId")] = None
 ) -> list[BotTransaction]:
     if currency_id is None:
         return list_pending_into_bot(db, bot)
