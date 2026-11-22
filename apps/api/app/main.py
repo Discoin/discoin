@@ -83,7 +83,7 @@ def create_app() -> FastAPI:
             finally:
                 pool.close()
 
-    app = FastAPI(title="Discoin API", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(title="Discoin API", version="1.0.0", lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.settings = settings
     app.state.secret_box = SecretBox.from_base64(settings.webhook_secret_key)
     app.state.credential_limiter = RateLimiter(CREDENTIAL_REQUESTS_PER_MINUTE, RATE_WINDOW_SECONDS)

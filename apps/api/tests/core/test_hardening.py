@@ -241,14 +241,11 @@ def test_openapi_lists_only_the_endpoints_bots_use(client: TestClient) -> None:
     assert sorted(paths["/transactions/{transaction_id}"]) == ["patch"]
 
 
-def test_docs_behind_the_dashboard_proxy_load_the_schema_under_its_prefix(client: TestClient) -> None:
+def test_the_schema_behind_the_dashboard_proxy_loads_under_its_prefix(client: TestClient) -> None:
     prefix = "/api"
     proxied = TestClient(client.app, base_url="https://testserver", root_path=prefix)
 
-    docs = proxied.get(f"{prefix}/docs")
     schema = proxied.get(f"{prefix}/openapi.json").json()
 
-    assert docs.status_code == 200
-    assert f"url: '{prefix}/openapi.json'" in docs.text
     assert schema["servers"] == [{"url": prefix}]
     assert "/currencies" in schema["paths"]

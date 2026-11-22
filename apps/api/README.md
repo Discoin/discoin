@@ -86,12 +86,12 @@ Tell every bot integrator what changes for them:
 - Money is a JSON number with at most 2 decimals.
 - A currency code (abbreviation) is exactly 3 or 4 letters A to Z. It is stored in capitals and looked up in any case.
 - `GET /auth/discord/login?next=/owner` returns the user to that page after login. `next` must be a path on the dashboard that starts with a single `/`; anything else (`//`, a scheme, backslashes, control characters) is a 400 on `next`.
-- `GET /currencies` lists active currencies. Add `?includeInactive=true` to also get inactive ones. Removed currencies are never listed.
+- `GET /currencies` lists active currencies only. Inactive and removed currencies are never listed, and `GET /currencies/{abbreviation}`, `/currencies/{id}/history` and `/currencies/{id}/transactions` answer 404 for them.
 - Every transaction carries `fromCurrency` and `toCurrency`, each `{abbreviation, name, removed}`, next to the two IDs. A removed currency's abbreviation can belong to a newer currency, so show the name for any side with `removed: true`.
 - Transaction lists take `limit` (1 to 100, default 50) and `before`, the ID of the last transaction already shown.
 - Logged in writes (POST, PUT, PATCH, DELETE with the session cookie) must send the dashboard's `Origin`.
 - Requests are limited to 1200 a minute per client address and 300 a minute per credential. Over the limit, the API answers 429 with `Retry-After`.
-- The OpenAPI document is at `/openapi.json` and the docs at `/docs`. The API runs with the root path `/api`, so open the docs through the dashboard at `/api/docs`.
+- The OpenAPI document is at `/openapi.json`, for tooling. The API serves no Swagger UI or Redoc page. The docs for bot developers are a page on the dashboard at `/docs`, written by hand in `apps/frontend/src/pages/Docs/endpoints.ts`. `tests/core/test_docs.py` fails when a public route is missing from that page, or when the page lists a route that no longer exists.
 
 ## Bots and owners
 
@@ -126,7 +126,7 @@ Admins can remove a currency, or a bot together with all of its currencies. Remo
 
 Each bot has one webhook URL and one secret. The worker posts each event to the webhook of the receiving currency's bot, so events for all of a bot's currencies go to the same URL; `fromCurrencyId` and `toCurrencyId` in the transaction tell them apart. The body is `{id, event, transaction, triggeredBy?}`, where `event` is `transaction.created`, `transaction.cancelled` or `transaction.reversed`. On events caused by a block, `triggeredBy` is `{kind: "admins"}` or `{kind: "owner", botId}`, naming the bot whose owner blocked the user.
 
-Each request carries `Discoin-Signature: t=<unix seconds>,v1=<hex>`. The hex is the HMAC SHA256 of `<t>.<raw body>` with the bot's webhook secret. Check it, and reject old timestamps.
+Each request carries `Discoin-Signature: <hex>`. The hex is the HMAC SHA256 of the raw body with the bot's webhook secret. Check it before trusting the request.
 
 The bot owner page has a Test button that sends one `transaction.test` event to the bot's saved URL, signed like a real one, with a made up transaction whose `fromCurrencyId` and `toCurrencyId` are both the nil UUID `00000000-0000-0000-0000-000000000000`. Nothing is saved and no coins move, so bots should check the signature and then ignore it. Resending a Pending transaction's webhook is open to the owner of the bot that receives it.
 

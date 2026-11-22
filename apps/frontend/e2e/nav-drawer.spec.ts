@@ -8,12 +8,11 @@ import {
   drawerApiDocs,
   drawerBrand,
   drawerResources,
-  expectLeftForApiDocs,
+  expectOnDocsPage,
   menuButton,
   navDrawer,
   openNavDrawer,
   openPage,
-  stubApiDocs,
 } from "./support.js";
 
 const SHORT_VIEWPORT = { width: 320, height: 200 };
@@ -302,18 +301,18 @@ test("the page behind the open drawer cannot be focused or scrolled", async ({
   await expect.poll(() => scrollTop(page)).toBeGreaterThan(0);
 });
 
-test("API Docs in the drawer leaves the app for Swagger in the same tab", async ({
+test("API Docs in the drawer opens the docs page and closes the drawer", async ({
   page,
 }) => {
-  const documentRequests = await stubApiDocs(page);
   await openPhonePage(page, "/");
   const drawer = await openNavDrawer(page);
   await drawerResources(drawer).click();
   const docs = drawerApiDocs(drawer);
 
-  await expect(docs).toHaveAttribute("href", "/api/docs");
+  await expect(docs).toHaveAttribute("href", "/docs");
   await docs.click();
-  await expectLeftForApiDocs(page, documentRequests);
+  await expectOnDocsPage(page);
+  await expect(navDrawer(page)).toHaveCount(0);
 });
 
 test("widening to desktop closes the drawer and frees the page", async ({

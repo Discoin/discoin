@@ -89,7 +89,7 @@ const SAMPLE_AVATAR =
   encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#5865f2"/><text x="32" y="42" font-family="sans-serif" font-size="30" font-weight="700" text-anchor="middle" fill="#fff">C</text></svg>',
   );
-const TOKEN_PREFIX = "dsc_live_";
+const TOKEN_PREFIX = "dsc_";
 const TOKEN_LENGTH = 24;
 const TOKEN_ALPHABET =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -209,7 +209,7 @@ function discordUserId(value: string, field: string): string {
   if (!DISCORD_ID_PATTERN.test(trimmed)) {
     throw new ApiError(
       400,
-      "Enter a Discord user ID: 17 to 20 digits, like 412358906715234305.",
+      "Enter a Discord user ID, like 412358906715234305.",
       field,
     );
   }
@@ -1051,7 +1051,7 @@ export function createMockApi(): DiscoinApi {
         const found = state.currencies.find(
           (candidate) => candidate.abbreviation === wanted,
         );
-        if (found === undefined) {
+        if (found === undefined || !found.active) {
           throw new ApiError(404, `No currency called ${wanted}.`);
         }
 
@@ -1059,13 +1059,13 @@ export function createMockApi(): DiscoinApi {
       }),
     listCurrencyTransactions: (currencyId) =>
       respond(() => {
-        currency(currencyId);
+        if (!currency(currencyId).active) throw notFound("currency");
 
         return labeledWhere(involvesCurrency(currencyId));
       }),
     getReserveHistory: (currencyId, days) =>
       respond(() => {
-        currency(currencyId);
+        if (!currency(currencyId).active) throw notFound("currency");
         const points = lookup(state.histories, currencyId, "currency");
         const latest = Date.parse(points[points.length - 1].at);
         const since = latest - days * DAY_MS;

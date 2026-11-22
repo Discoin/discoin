@@ -58,7 +58,7 @@ export default defineConfig({
       prerender: {
         enabled: true,
         renderTarget: "#app",
-        additionalPrerenderRoutes: ["/404", "/currency/OAT"],
+        additionalPrerenderRoutes: ["/404", "/currency/OAT", "/docs"],
         previewMiddlewareEnabled: true,
         previewMiddlewareFallback: "/404",
       },

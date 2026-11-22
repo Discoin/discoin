@@ -146,7 +146,7 @@ beforeEach(() => {
     Promise.resolve(PENDING[botId]),
   );
   api.listBlocks.mockResolvedValue([]);
-  api.regenerateApiToken.mockResolvedValue("dsc_live_newtoken");
+  api.regenerateApiToken.mockResolvedValue("dsc_newtoken");
   api.generateWebhookSecret.mockResolvedValue("whsec_newsecret");
   api.botBlocks.mockImplementation(blockListOf);
   api.updateCurrencyDetails.mockImplementation(

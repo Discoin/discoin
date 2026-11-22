@@ -10,7 +10,7 @@ from app.auth.sessions import hash_secret
 from app.core.database import Database
 from app.core.errors import ApiError
 
-TOKEN_PREFIX = "dsc_live_"
+TOKEN_PREFIX = "dsc_"
 BEARER_PREFIX = "Bearer "
 
 

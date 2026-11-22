@@ -7,7 +7,7 @@ from psycopg import Connection
 from psycopg.rows import DictRow
 
 from app.core.errors import ApiError, not_found
-from app.currencies.queries import require_currency_exists
+from app.currencies.queries import require_active_currency
 from app.transactions.models import BotTransaction, Transaction
 
 DEFAULT_PAGE_SIZE = 50
@@ -52,7 +52,7 @@ def list_recent_transactions(db: Connection[DictRow], page: Page) -> list[Transa
 
 
 def list_currency_transactions(db: Connection[DictRow], currency_id: UUID, page: Page) -> list[Transaction]:
-    require_currency_exists(db, currency_id)
+    require_active_currency(db, currency_id)
 
     return fetch_page(
         db,

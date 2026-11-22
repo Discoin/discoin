@@ -50,9 +50,8 @@ def share_bot(connection: psycopg.Connection, currency_id: UUID, abbreviation: s
 
 
 def verified_body(request: httpx.Request, secret: str) -> dict:
-    timestamp, digest = (part.split("=", 1)[1] for part in request.headers[SIGNATURE_HEADER].split(","))
-    expected = hmac.new(secret.encode(), f"{timestamp}.".encode() + request.content, hashlib.sha256).hexdigest()
-    assert hmac.compare_digest(digest, expected)
+    expected = hmac.new(secret.encode(), request.content, hashlib.sha256).hexdigest()
+    assert hmac.compare_digest(request.headers[SIGNATURE_HEADER], expected)
 
     return json.loads(request.content)
 
@@ -91,6 +90,22 @@ def test_new_transaction_is_delivered_signed(
     assert body["transaction"]["id"] == created["id"]
     assert body["transaction"]["userId"] == USER_ID
     assert delivery_states(connection)[0]["state"] == "delivered"
+
+
+def test_signature_header_is_only_the_hex_hmac_of_the_raw_body(
+    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID]
+) -> None:
+    rich, poor = pair
+    secret = connect_webhook(connection, poor)
+    convert(client, connection, rich, poor)
+    receiver = Receiver([200])
+
+    deliver_due_webhooks(connection, receiver.sender(), NOW)
+
+    request = receiver.requests[0]
+    header = request.headers[SIGNATURE_HEADER]
+    assert header == hmac.new(secret.encode(), request.content, hashlib.sha256).hexdigest()
+    assert not any(old_format_part in header for old_format_part in ("t=", "v1=", ","))
 
 
 def test_every_currency_of_a_bot_delivers_to_the_bot_webhook(

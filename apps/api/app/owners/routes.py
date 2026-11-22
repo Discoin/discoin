@@ -70,7 +70,7 @@ def send_test_webhook(
 
     delivery = build_test_delivery(webhook, owned.owner_id, now)
 
-    outcome = sender.send(delivery, now)
+    outcome = sender.send(delivery)
     if outcome.status is None:
         raise ApiError(502, f"Discoin couldn't reach your webhook. {outcome.error}")
 

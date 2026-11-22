@@ -7,17 +7,35 @@ from fastapi.testclient import TestClient
 from tests.factories import NOW, create_currency, create_transaction, deactivate
 
 
-def test_currency_list_shows_inactive_currencies_only_when_asked(
-    client: TestClient, connection: psycopg.Connection
-) -> None:
+def test_currency_list_never_shows_inactive_currencies(client: TestClient, connection: psycopg.Connection) -> None:
     create_currency(connection, "OAT", 100_000)
     deactivate(connection, create_currency(connection, "OFF", 100_000))
 
-    active = client.get("/currencies").json()
-    every = client.get("/currencies", params={"includeInactive": "true"}).json()
+    plain = client.get("/currencies").json()
+    asked = client.get("/currencies", params={"includeInactive": "true"}).json()
 
-    assert [currency["abbreviation"] for currency in active] == ["OAT"]
-    assert [(currency["abbreviation"], currency["active"]) for currency in every] == [("OAT", True), ("OFF", False)]
+    assert [currency["abbreviation"] for currency in plain] == ["OAT"]
+    assert [currency["abbreviation"] for currency in asked] == ["OAT"]
+
+
+def test_inactive_currency_lookup_is_not_found(client: TestClient, connection: psycopg.Connection) -> None:
+    deactivate(connection, create_currency(connection, "OFF", 100_000))
+
+    assert client.get("/currencies/off").status_code == 404
+
+
+def test_inactive_currency_history_is_not_found(client: TestClient, connection: psycopg.Connection) -> None:
+    currency_id = create_currency(connection, "OFF", 100_000)
+    deactivate(connection, currency_id)
+
+    assert client.get(f"/currencies/{currency_id}/history", params={"days": 7}).status_code == 404
+
+
+def test_inactive_currency_transactions_are_not_found(client: TestClient, connection: psycopg.Connection) -> None:
+    currency_id = create_currency(connection, "OFF", 100_000)
+    deactivate(connection, currency_id)
+
+    assert client.get(f"/currencies/{currency_id}/transactions").status_code == 404
 
 
 def test_currency_shape_matches_the_frontend(client: TestClient, connection: psycopg.Connection) -> None:

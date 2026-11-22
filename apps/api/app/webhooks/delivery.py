@@ -141,11 +141,8 @@ def retry_delay(failed_attempts: int) -> timedelta:
     return min(FIRST_RETRY_DELAY * 2 ** (failed_attempts - 1), LONGEST_RETRY_DELAY)
 
 
-def signature(secret: str, timestamp: int, body: bytes) -> str:
-    signed = f"{timestamp}.".encode() + body
-    digest = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
-
-    return f"t={timestamp},v1={digest}"
+def signature(secret: str, body: bytes) -> str:
+    return hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
 class WebhookSender:
@@ -153,7 +150,7 @@ class WebhookSender:
         self.http = http
         self.box = box
 
-    def send(self, delivery: dict[str, Any], now: datetime) -> Outcome:
+    def send(self, delivery: dict[str, Any]) -> Outcome:
         if delivery["webhook_url"] is None:
             return Outcome(status=None, error="The webhook URL was removed.")
 
@@ -163,7 +160,7 @@ class WebhookSender:
             return Outcome(status=None, error=f"The webhook secret could not be read: {type(error).__name__}")
 
         body = json.dumps({"id": delivery["id"], **delivery["payload"]}, separators=(",", ":")).encode()
-        headers = {"Content-Type": "application/json", SIGNATURE_HEADER: signature(secret, int(now.timestamp()), body)}
+        headers = {"Content-Type": "application/json", SIGNATURE_HEADER: signature(secret, body)}
         try:
             response = self.http.post(delivery["webhook_url"], content=body, headers=headers)
         except httpx.HTTPError as error:
@@ -202,7 +199,7 @@ def deliver_next(db: Connection[DictRow], sender: WebhookSender, now: datetime) 
         if delivery is None:
             return False
 
-        record_attempt(db, delivery, sender.send(delivery, now), now)
+        record_attempt(db, delivery, sender.send(delivery), now)
 
     return True
 

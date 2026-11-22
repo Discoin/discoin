@@ -1,4 +1,3 @@
-import { API_BASE } from "../../api/http.js";
 import { PHONE_QUERY } from "../../lib/breakpoints.js";
 import { useMediaChange } from "../../lib/useMediaChange.js";
 import {
@@ -13,9 +12,7 @@ interface ResourceLink {
   href: string;
 }
 
-const RESOURCE_LINKS: ResourceLink[] = [
-  { label: "API Docs", href: `${API_BASE}/docs` },
-];
+const RESOURCE_LINKS: ResourceLink[] = [{ label: "API Docs", href: "/docs" }];
 
 export function ResourcesLabel() {
   return (
@@ -68,11 +65,16 @@ export function ResourcesMenu() {
   const disclosure = useDisclosure();
   const popup = usePopupDismissal(disclosure);
 
+  function closeOnFollowedLink(event: MouseEvent) {
+    if ((event.target as Element).closest("a") !== null) disclosure.close();
+  }
+
   return (
     <div
       ref={popup.rootRef}
       class="resources-menu"
       onKeyDown={popup.closeOnEscape}
+      onClick={closeOnFollowedLink}
     >
       <DisclosureTrigger
         disclosure={disclosure}

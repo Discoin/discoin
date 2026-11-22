@@ -49,17 +49,13 @@ def list_active_currencies(db: Connection[DictRow], now: datetime) -> list[Curre
     return [to_currency(row) for row in fetch_currency_rows(db, "c.active", {}, now)]
 
 
-def list_all_currencies(db: Connection[DictRow], now: datetime) -> list[Currency]:
-    return [to_currency(row) for row in fetch_currency_rows(db, "true", {}, now)]
-
-
 def list_owned_currency_rows(db: Connection[DictRow], owner_id: str, now: datetime) -> list[dict[str, Any]]:
     return fetch_currency_rows(db, "b.owner_id = %(owner_id)s", {"owner_id": owner_id}, now)
 
 
 def find_currency_by_abbreviation(db: Connection[DictRow], abbreviation: str, now: datetime) -> Currency:
     wanted = abbreviation.upper()
-    rows = fetch_currency_rows(db, "c.abbreviation = %(abbreviation)s", {"abbreviation": wanted}, now)
+    rows = fetch_currency_rows(db, "c.active AND c.abbreviation = %(abbreviation)s", {"abbreviation": wanted}, now)
     if not rows:
         raise ApiError(404, f"No currency called {wanted}.")
 
@@ -115,7 +111,7 @@ def reserve_history(db: Connection[DictRow], currency_id: UUID, days: int, now: 
     if days not in HISTORY_DAYS:
         raise ApiError(400, "Pick a history of 7 or 30 days.", "days")
 
-    require_currency_exists(db, currency_id)
+    require_active_currency(db, currency_id)
     start = now - timedelta(days=days)
     rows = db.execute(
         """
@@ -137,8 +133,10 @@ def reserve_history(db: Connection[DictRow], currency_id: UUID, days: int, now: 
     return [ReservePoint(at=row["at"], reserve=row["reserve"]) for row in rows]
 
 
-def require_currency_exists(db: Connection[DictRow], currency_id: UUID) -> None:
-    row = db.execute("SELECT 1 FROM currencies WHERE id = %s AND removed_at IS NULL", (currency_id,)).fetchone()
+def require_active_currency(db: Connection[DictRow], currency_id: UUID) -> None:
+    row = db.execute(
+        "SELECT 1 FROM currencies WHERE id = %s AND removed_at IS NULL AND active", (currency_id,)
+    ).fetchone()
     if row is None:
         raise not_found("currency")
 

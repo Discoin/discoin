@@ -82,10 +82,10 @@ describe("requests", () => {
     {
       name: "a regenerated token as plain text",
       call: () => api.regenerateApiToken("b1"),
-      answer: jsonResponse(200, { token: "dsc_live_abc" }),
+      answer: jsonResponse(200, { token: "dsc_abc" }),
       method: "POST",
       url: "/api/bots/b1/api-token",
-      returns: "dsc_live_abc",
+      returns: "dsc_abc",
     },
     {
       name: "a webhook secret for the bot",
