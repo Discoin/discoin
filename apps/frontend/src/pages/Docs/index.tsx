@@ -1,5 +1,6 @@
 import type { ComponentChildren } from "preact";
 import { PageIntro } from "../../components/layout/PageIntro.jsx";
+import { TableFrame } from "../../components/shared/TableFrame.jsx";
 import { usePageTitle } from "../../lib/usePageTitle.js";
 import {
   API_URL,
@@ -25,6 +26,11 @@ const OVERVIEW = { id: "overview", title: "Overview" };
 const AUTHENTICATION = { id: "authentication", title: "Authentication" };
 const ERRORS = { id: "errors", title: "Errors" };
 const RATE_LIMITS = { id: "rate-limits", title: "Rate limits" };
+const UNDONE_TRANSACTIONS = {
+  id: "undone-transactions",
+  title: "Undone transactions",
+};
+const EVENT_FEED = { id: "event-feed", title: "Event feed" };
 const WEBHOOKS = { id: "webhooks", title: "Webhooks" };
 const LEADING_SECTIONS = [OVERVIEW, AUTHENTICATION, ERRORS, RATE_LIMITS];
 
@@ -51,6 +57,26 @@ const WEBHOOK_EXAMPLE = json({
   event: "transaction.created",
   transaction: WEBHOOK_TRANSACTION,
 });
+
+const GIVE_THE_AMOUNT_BACK = "Give the amount back to the user.";
+const UNDONE_JOBS = [
+  {
+    status: "Refunded",
+    receiving: "Not listed. Your bot refunded it itself.",
+    sending: GIVE_THE_AMOUNT_BACK,
+  },
+  {
+    status: "Cancelled",
+    receiving:
+      "Stop waiting for it. Your bot never paid, so there is nothing to take back.",
+    sending: GIVE_THE_AMOUNT_BACK,
+  },
+  {
+    status: "Reversed",
+    receiving: "Take the payout back from the user.",
+    sending: GIVE_THE_AMOUNT_BACK,
+  },
+];
 
 function endpointTitle(endpoint: Endpoint): string {
   return `${endpoint.method} ${endpoint.path}`;
@@ -106,6 +132,8 @@ function SectionLinks() {
             </ul>
           </li>
         ))}
+        <SectionLink heading={UNDONE_TRANSACTIONS} />
+        <SectionLink heading={EVENT_FEED} />
         <SectionLink heading={WEBHOOKS} />
       </ul>
     </nav>
@@ -130,8 +158,10 @@ function Overview() {
         names, and money is a JSON number with at most 2 decimals.
       </p>
       <p>
-        Once a Discoin admin has registered your bot, generate its API token and
-        set its webhook on the <a href="/owner">Bot owner page</a>.
+        Once a Discoin admin has registered your bot, generate its API token on
+        the <a href="/owner">Bot owner page</a>. To hear about transactions, set
+        a webhook there if your bot is a web service, or leave it unset and poll
+        the event feed.
       </p>
     </DocSection>
   );
@@ -256,11 +286,17 @@ function EndpointBlock({ endpoint }: { endpoint: Endpoint }) {
         code={endpoint.request}
         label={`${title} request`}
       />
-      <CodeSample
-        title={`Response ${endpoint.responseStatus}`}
-        code={endpoint.response}
-        label={`${title} response`}
-      />
+      {endpoint.response === "" ? (
+        <p>
+          Answers <code>{endpoint.responseStatus}</code> with no body.
+        </p>
+      ) : (
+        <CodeSample
+          title={`Response ${endpoint.responseStatus}`}
+          code={endpoint.response}
+          label={`${title} response`}
+        />
+      )}
       {endpoint.errors.length > 0 && <EndpointErrors cases={endpoint.errors} />}
     </section>
   );
@@ -277,6 +313,166 @@ function EndpointSection({ group }: { group: EndpointGroup }) {
   );
 }
 
+function UndoneJobsTable() {
+  const label = "What to do with an undone transaction";
+
+  return (
+    <TableFrame label={label}>
+      <table class="data-table">
+        <caption class="visually-hidden">{label}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Status</th>
+            <th scope="col">Into one of your currencies</th>
+            <th scope="col">Out of one of your currencies</th>
+          </tr>
+        </thead>
+        <tbody>
+          {UNDONE_JOBS.map((job) => (
+            <tr key={job.status}>
+              <td>{job.status}</td>
+              <td>{job.receiving}</td>
+              <td>{job.sending}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </TableFrame>
+  );
+}
+
+function UndoneTransactions() {
+  return (
+    <DocSection heading={UNDONE_TRANSACTIONS}>
+      <p>
+        A transaction is undone when it becomes Refunded, Cancelled or Reversed.{" "}
+        <code>GET /transactions/undone</code> lists every undone transaction
+        your bot still has to deal with, on both sides: the ones into your
+        currencies and the ones out of them. Compare <code>fromCurrencyId</code>{" "}
+        and <code>toCurrencyId</code> with your own currencies to see which side
+        your bot is on.
+      </p>
+      <UndoneJobsTable />
+      <p>
+        If your bot runs both currencies of a transaction, it is listed once. Do
+        both jobs, then mark it once.
+      </p>
+      <p>
+        This list, not the event feed and not webhooks, is how your bot recovers
+        a reversal it missed. It is also the only way a sending bot learns that
+        its transaction was refunded, cancelled or reversed, because events only
+        go to the receiving bot.
+      </p>
+
+      <h3>Read, act, mark</h3>
+      <ol>
+        <li>
+          When your bot starts, and then about once a minute, call{" "}
+          <code>GET /transactions/undone</code>.
+        </li>
+        <li>
+          For each transaction, move the coins as the table says and save in
+          your own records that you did. Check those records first, so a
+          transaction you already acted on never moves coins twice.
+        </li>
+        <li>
+          Send <code>PUT /transactions/{"{id}"}/handled</code>. Marking twice is
+          safe, so repeat it if your bot stopped before the answer came back.
+        </li>
+        <li>
+          A full batch means more can be waiting, so call again once you have
+          marked every transaction in it.
+        </li>
+      </ol>
+      <p>
+        Mark every transaction you receive, even one your bot can only log. The
+        list has no cursor: a transaction you never mark comes back first on
+        every call. A delivered webhook or an acknowledged feed event does not
+        mark anything, so a reversal your bot already handled from an event
+        still shows up here. Skip the coins, then mark it.
+      </p>
+      <p>
+        Transactions of an inactive or removed currency stay on the list, with{" "}
+        <code>removed: true</code> on that side. The <code>currencyId</code>{" "}
+        filter answers <code>404</code> for a removed currency, so call without
+        it to see them.
+      </p>
+    </DocSection>
+  );
+}
+
+function EventFeed() {
+  return (
+    <DocSection heading={EVENT_FEED}>
+      <p>
+        The event feed is for bots with no public address. Your bot asks{" "}
+        <code>GET /events</code> for what happened to transactions into its
+        currencies, with its normal API token. It needs no URL, no secret and no
+        signature check.
+      </p>
+      <p>
+        A bot uses a webhook or the event feed, not both. While your bot has a
+        webhook URL, every event goes to the webhook and both feed endpoints
+        answer <code>409</code>. Treat that as final: stop polling and remove
+        the URL on the Bot owner page, or use the webhook.
+      </p>
+
+      <h3>Polling</h3>
+      <ol>
+        <li>
+          When your bot starts, read <code>GET /transactions/pending</code> and{" "}
+          <code>GET /transactions/undone</code> and handle what is there.
+        </li>
+        <li>
+          Call <code>GET /events</code> about every 2 seconds and handle the
+          events in <code>id</code> order. They are the same events, with the
+          same body, as the ones listed under Webhooks.
+        </li>
+        <li>
+          After handling them, send the highest <code>id</code> to{" "}
+          <code>POST /events/ack</code>. Discoin keeps that cursor, so your bot
+          picks up where it stopped after a restart.
+        </li>
+        <li>A full batch means more are waiting, so call again at once.</li>
+      </ol>
+
+      <h3>Duplicates</h3>
+      <p>
+        Your bot can get an event twice: when it stops between handling an event
+        and acknowledging it, and when the owner resends a transaction from the
+        Bot owner page. Skip an event when you already handled that transaction{" "}
+        <code>id</code> with that <code>event</code>.
+      </p>
+
+      <h3>Expiry</h3>
+      <p>
+        Discoin keeps an event for 24 hours, then deletes it whether your bot
+        read it or not. There is no error for that: <code>GET /events</code>{" "}
+        returns what is still stored. If your bot was offline for more than 24
+        hours, the older events are gone without notice, so read{" "}
+        <code>GET /transactions/pending</code> and{" "}
+        <code>GET /transactions/undone</code> when it starts to catch up.
+      </p>
+
+      <h3>Switching</h3>
+      <ul>
+        <li>
+          Saving a webhook URL switches the feed off and deletes the events your
+          bot had not read. They are not sent to the webhook, so read{" "}
+          <code>GET /transactions/pending</code> and{" "}
+          <code>GET /transactions/undone</code> to catch up.
+        </li>
+        <li>
+          Removing the webhook URL switches the feed on, and it starts empty.
+          Events already queued for the webhook are not moved to the feed, so
+          read <code>GET /transactions/pending</code> and{" "}
+          <code>GET /transactions/undone</code> here too.
+        </li>
+      </ul>
+    </DocSection>
+  );
+}
+
 function Webhooks() {
   return (
     <DocSection heading={WEBHOOKS}>
@@ -284,7 +480,8 @@ function Webhooks() {
         Set your bot's webhook URL on the Bot owner page. It also gives you a
         secret that starts with <code>whsec_</code>. Discoin posts an event to
         that URL whenever something happens to a transaction into one of your
-        bot's currencies. Webhooks only go to public https addresses.
+        bot's currencies. Webhooks only go to public https addresses. A bot with
+        a webhook URL gets its events there and can't read the event feed.
       </p>
 
       <h3>Events</h3>
@@ -304,7 +501,8 @@ function Webhooks() {
         </li>
         <li>
           <code>transaction.test</code>: sent by the Test button on the Bot
-          owner page. Check its signature, then ignore it.
+          owner page. On a webhook, check its signature, then ignore it. In the
+          event feed, acknowledge it like any other event.
         </li>
       </ul>
 
@@ -333,10 +531,12 @@ function Webhooks() {
       <h3>Retries</h3>
       <p>
         A 2xx answer counts as delivered. Any other answer, a timeout or a
-        redirect is retried, since redirects are not followed. The first retry
-        comes after 10 seconds, and each wait doubles up to 1 hour, for at most
-        10 retries. After that the transaction stays as it is, so poll{" "}
-        <code>GET /transactions/pending</code> to catch anything you missed.
+        redirect is retried, since redirects are not followed. Discoin tries 8
+        times in all. The first retry comes after 1 minute and each wait
+        doubles, up to 64 minutes before the last try, about 2 hours in total.
+        After that the transaction stays as it is, so poll{" "}
+        <code>GET /transactions/pending</code> and{" "}
+        <code>GET /transactions/undone</code> to catch anything you missed.
       </p>
     </DocSection>
   );
@@ -348,8 +548,8 @@ export function Docs() {
   return (
     <article class="prose docs">
       <PageIntro title="API docs">
-        Everything your bot needs to trade on Discoin: market data, transactions
-        and webhooks.
+        Everything your bot needs to trade on Discoin: market data,
+        transactions, the event feed and webhooks.
       </PageIntro>
 
       <div class="docs__layout">
@@ -362,6 +562,8 @@ export function Docs() {
           {ENDPOINT_GROUPS.map((group) => (
             <EndpointSection key={group.id} group={group} />
           ))}
+          <UndoneTransactions />
+          <EventFeed />
           <Webhooks />
         </div>
       </div>

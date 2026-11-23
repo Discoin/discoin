@@ -55,6 +55,9 @@ export function WebhookForm({
   function sendTest() {
     void action.run(async () => {
       const status = await api.testWebhook(botId);
+      if (status === null) {
+        return "Test event added to your event feed. Your bot gets it on its next read.";
+      }
 
       return `Test sent. Your webhook answered ${status}.`;
     });
@@ -83,7 +86,7 @@ export function WebhookForm({
           type="url"
           value={url}
           placeholder="https://bot.example.com/discoin"
-          hint="Discoin sends a signed request here for every transaction into any of this bot's currencies."
+          hint="Discoin sends a signed request here for every transaction into any of this bot's currencies. With a webhook URL, events are sent to it and the event feed is switched off."
           error={action.fieldError("webhookUrl")}
           onInput={(event) => setUrl(event.currentTarget.value)}
         />
@@ -95,23 +98,24 @@ export function WebhookForm({
           >
             Save webhook
           </Button>
+          <Button
+            variant="secondary"
+            disabled={action.state.status === "pending"}
+            onClick={sendTest}
+          >
+            Test
+            <span class="visually-hidden">
+              {savedUrl === null ? " event feed" : " webhook"}
+            </span>
+          </Button>
           {savedUrl !== null && (
-            <>
-              <Button
-                variant="secondary"
-                disabled={action.state.status === "pending"}
-                onClick={sendTest}
-              >
-                Test<span class="visually-hidden"> webhook</span>
-              </Button>
-              <Button
-                variant="outline"
-                disabled={action.state.status === "pending"}
-                onClick={remove}
-              >
-                Remove webhook
-              </Button>
-            </>
+            <Button
+              variant="outline"
+              disabled={action.state.status === "pending"}
+              onClick={remove}
+            >
+              Remove webhook
+            </Button>
           )}
         </div>
         <ActionStatus state={action.state} inlineFields={["webhookUrl"]} />

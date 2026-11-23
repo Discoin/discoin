@@ -1161,17 +1161,9 @@ export function createMockApi(): DiscoinApi {
         }));
       }),
     testWebhook: (botId) =>
-      respond(() => {
-        if (ownedBot(botId).webhookUrl === null) {
-          throw new ApiError(
-            400,
-            "Save a webhook URL before sending a test.",
-            "webhookUrl",
-          );
-        }
-
-        return MOCK_WEBHOOK_STATUS;
-      }),
+      respond(() =>
+        ownedBot(botId).webhookUrl === null ? null : MOCK_WEBHOOK_STATUS,
+      ),
     removeWebhookUrl: (botId) =>
       respond(() => {
         updateOwnedBot(botId, (found) => ({ ...found, webhookUrl: null }));
@@ -1213,17 +1205,10 @@ export function createMockApi(): DiscoinApi {
         );
         if (transaction === undefined) throw notFound("transaction");
 
-        const receivingBot = botOfOwnedCurrency(transaction.toCurrencyId);
+        botOfOwnedCurrency(transaction.toCurrencyId);
 
         if (transaction.status !== "Pending") {
           throw new ApiError(400, "Only Pending transactions can be resent.");
-        }
-
-        if (receivingBot.webhookUrl === null) {
-          throw new ApiError(
-            400,
-            "Add a webhook URL before resending. Your bot can still poll for this transaction.",
-          );
         }
       }),
     botBlocks: (botId) =>

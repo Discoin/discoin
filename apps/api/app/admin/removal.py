@@ -6,6 +6,7 @@ from psycopg import Connection
 from psycopg.rows import DictRow
 
 from app.admin.deactivation import cancel_pending
+from app.bots.feed import clear_feed
 from app.core.errors import not_found
 from app.core.models import CamelModel
 from app.transactions.exchange import lock_exchange_sides
@@ -69,6 +70,7 @@ def remove_bot(db: Connection[DictRow], bot_id: UUID, now: datetime) -> None:
     cancel_pending(db, currency_ids, now)
     retire_currencies(db, currency_ids, now)
     drop_pending_deliveries(db, bot_id, BOT_REMOVED)
+    clear_feed(db, bot_id)
     # Clearing the unique token column blocks foreign key checks on this bot row, so it runs after every other lock.
     db.execute("UPDATE bots SET api_token_hash = NULL, removed_at = %s WHERE id = %s", (now, bot_id))
 
@@ -81,6 +83,7 @@ def revoke_credentials(db: Connection[DictRow], bot_id: UUID, reason: str) -> No
         (bot_id,),
     )
     drop_pending_deliveries(db, bot_id, reason)
+    clear_feed(db, bot_id)
 
 
 def disconnect_webhook(db: Connection[DictRow], bot_id: UUID) -> None:

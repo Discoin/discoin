@@ -16,8 +16,13 @@ from app.transactions.exchange import lock_exchange_sides, unknown_currency
 from app.transactions.ledger import create_transaction, undo_transaction
 from app.transactions.models import BotTransaction
 from app.transactions.queries import (
+    CURRENCY_JOINS,
+    DEFAULT_PAGE_SIZE,
+    LARGEST_PAGE_SIZE,
     list_pending_into_bot,
     list_pending_into_currency,
+    list_undone_for_bot,
+    mark_undone_handled,
     returning_with_currencies,
 )
 
@@ -63,6 +68,25 @@ def get_pending_transactions(
         return list_pending_into_bot(db, bot)
 
     return list_pending_into_currency(db, require_bot_currency(db, BotCurrency(bot, currency_id, "currencyId")))
+
+
+@router.get("/undone")
+def get_undone_transactions(
+    bot: CallingBotId,
+    db: Database,
+    currency_id: Annotated[UUID | None, Query(alias="currencyId")] = None,
+    limit: Annotated[int, Query(ge=1, le=LARGEST_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
+) -> list[BotTransaction]:
+    if currency_id is not None:
+        require_bot_currency(db, BotCurrency(bot, currency_id, "currencyId"))
+
+    return list_undone_for_bot(db, bot, currency_id, limit)
+
+
+@router.put("/{transaction_id}/handled", status_code=204)
+def put_transaction_handled(transaction_id: UUID, bot: CallingBotId, db: Database, now: Now) -> None:
+    require_a_side_run_by(db, transaction_id, bot)
+    mark_undone_handled(db, transaction_id, bot, now)
 
 
 @router.patch("/{transaction_id}")
@@ -111,6 +135,22 @@ def require_received_by(db: Connection[DictRow], transaction_id: UUID, bot_id: U
         raise ApiError(403, "Only the bot receiving this transaction can update it.")
 
     return transaction
+
+
+def require_a_side_run_by(db: Connection[DictRow], transaction_id: UUID, bot_id: UUID) -> None:
+    transaction = db.execute(
+        f"""
+        SELECT f.bot_id AS sending_bot_id, o.bot_id AS receiving_bot_id
+        FROM transactions t {CURRENCY_JOINS}
+        WHERE t.id = %s
+        """,
+        (transaction_id,),
+    ).fetchone()
+    if transaction is None:
+        raise not_found("transaction")
+
+    if bot_id not in (transaction["sending_bot_id"], transaction["receiving_bot_id"]):
+        raise ApiError(403, "Only the bots sending or receiving this transaction can mark it handled.")
 
 
 def lock_pending(db: Connection[DictRow], transaction: dict[str, Any]) -> dict[str, Any]:

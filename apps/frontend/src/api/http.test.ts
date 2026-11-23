@@ -135,6 +135,14 @@ describe("requests", () => {
       url: "/api/bots/b1/webhook-test",
       returns: 204,
     },
+    {
+      name: "a test for a bot with no webhook URL, returning no status",
+      call: () => api.testWebhook("b1"),
+      answer: jsonResponse(200, { status: null }),
+      method: "POST",
+      url: "/api/bots/b1/webhook-test",
+      returns: null,
+    },
   ])(
     "$name goes to $method $url",
     async ({ call, answer, method, url, returns }) => {

@@ -6,6 +6,7 @@ from uuid import UUID
 from psycopg import Connection, sql
 from psycopg.rows import DictRow
 
+from app.bots.feed import lock_feeds_receiving
 from app.core.errors import ApiError
 from app.core.models import CamelModel
 from app.core.validation import checked_discord_id, checked_text
@@ -322,6 +323,7 @@ def undo_all(
 ) -> list[dict[str, Any]]:
     newest_first = sorted(to_undo, key=lambda row: (row["submitted_at"], row["id"]), reverse=True)
     undone = []
+    lock_feeds_receiving(db, [row["to_currency_id"] for row in to_undo])
 
     for row in newest_first:
         status, event = UNDO_STEPS[row["status"]]

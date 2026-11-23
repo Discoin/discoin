@@ -17,6 +17,7 @@ import type {
   PendingTransaction,
 } from "../../api/types.js";
 import { SessionProvider } from "../../components/session/SessionProvider.jsx";
+import { toasts } from "../../lib/toasts.js";
 import { NO_ANSWER_MESSAGE } from "../../lib/useAction.js";
 import { BotOwner } from "./index.jsx";
 
@@ -31,6 +32,7 @@ const api = vi.hoisted(() => ({
   setDailyCap: vi.fn(),
   regenerateApiToken: vi.fn(),
   generateWebhookSecret: vi.fn(),
+  testWebhook: vi.fn(),
   listBlocks: vi.fn(),
 }));
 
@@ -689,4 +691,49 @@ test("a bot whose currencies are all inactive says so", async () => {
   );
   expect(screen.queryByLabelText("Currency name")).toBeNull();
   expect(screen.getByRole("heading", { name: "API token" })).toBeTruthy();
+});
+
+test.each([
+  {
+    name: "a saved webhook URL",
+    webhookUrl: "https://harvest.example.com/hook",
+    button: /^Test\s?webhook$/,
+    answer: 204,
+    shown: "Test sent. Your webhook answered 204.",
+  },
+  {
+    name: "no webhook URL",
+    webhookUrl: null,
+    button: /^Test\s?event feed$/,
+    answer: null,
+    shown:
+      "Test event added to your event feed. Your bot gets it on its next read.",
+  },
+])(
+  "Test with $name says where the test event went",
+  async ({ webhookUrl, button, answer, shown }) => {
+    api.getBotSettings.mockResolvedValue({
+      hasApiToken: true,
+      hasWebhookSecret: true,
+      webhookUrl,
+    });
+    api.testWebhook.mockResolvedValue(answer);
+    const showToast = vi.spyOn(toasts, "show");
+    await renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: button }));
+
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(shown));
+    expect(api.testWebhook).toHaveBeenCalledWith("harvest");
+  },
+);
+
+test("the webhook field says a URL switches the event feed off", async () => {
+  await renderPage();
+
+  expect(
+    screen.getByText(
+      /With a webhook URL, events are sent to it and the event feed is switched off\.$/,
+    ),
+  ).toBeTruthy();
 });

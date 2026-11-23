@@ -73,7 +73,7 @@ export interface DiscoinApi {
   generateWebhookSecret(botId: string): Promise<string>;
   setWebhookUrl(botId: string, url: string): Promise<void>;
   removeWebhookUrl(botId: string): Promise<void>;
-  testWebhook(botId: string): Promise<number>;
+  testWebhook(botId: string): Promise<number | null>;
   setDailyCap(currencyId: string, cap: number): Promise<void>;
   removeDailyCap(currencyId: string): Promise<void>;
   listPendingTransactions(botId: string): Promise<PendingTransaction[]>;

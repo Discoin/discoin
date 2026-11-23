@@ -1,6 +1,6 @@
 import ipaddress
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request
 from psycopg import sql
 
 from app.auth.sessions import LoggedInUser
+from app.bots.feed import add_event, clear_feed, lock_feed
 from app.bots.tokens import issue_api_token
 from app.core.database import Database, Now
 from app.core.errors import ApiError, not_found
@@ -22,6 +23,7 @@ from app.currencies.queries import (
     to_currency,
 )
 from app.owners.access import (
+    BotOwnership,
     OwnedBot,
     OwnedBotForWrite,
     OwnedCurrency,
@@ -31,7 +33,13 @@ from app.owners.access import (
 )
 from app.transactions.models import BotTransaction
 from app.transactions.queries import list_pending_into_bot
-from app.webhooks.delivery import WebhookSender, build_test_delivery, enqueue_webhook, issue_webhook_secret
+from app.webhooks.delivery import (
+    TEST_DELIVERY_ID,
+    WebhookSender,
+    build_test_payload,
+    enqueue_webhook,
+    issue_webhook_secret,
+)
 
 CURRENCY_ID = "currency_id"
 
@@ -52,7 +60,7 @@ def webhook_sender(request: Request) -> WebhookSender:
 
 
 class WebhookTestResult(CamelModel):
-    status: int
+    status: int | None
 
 
 @router.post("/bots/{bot_id}/webhook-test")
@@ -62,15 +70,15 @@ def send_test_webhook(
     db: Database,
     now: Now,
 ) -> WebhookTestResult:
-    webhook = db.execute(
-        "SELECT id AS bot_id, webhook_url, webhook_secret_sealed FROM bots WHERE id = %s", (owned.bot_id,)
-    ).fetchone()
+    payload = build_test_payload(owned.owner_id, now)
+
+    webhook = find_webhook_locking_a_missing_url(db, owned)
     if webhook["webhook_url"] is None:
-        raise ApiError(400, "Save a webhook URL before sending a test.", "webhookUrl")
+        add_event(db, owned.bot_id, payload, now)
 
-    delivery = build_test_delivery(webhook, owned.owner_id, now)
+        return WebhookTestResult(status=None)
 
-    outcome = sender.send(delivery)
+    outcome = sender.send({"id": TEST_DELIVERY_ID, **webhook, "payload": payload})
     if outcome.status is None:
         raise ApiError(502, f"Discoin couldn't reach your webhook. {outcome.error}")
 
@@ -78,6 +86,23 @@ def send_test_webhook(
         raise ApiError(502, f"Your webhook answered {outcome.status}. Discoin expects a 2xx answer.")
 
     return WebhookTestResult(status=outcome.status)
+
+
+def find_webhook_locking_a_missing_url(db: Database, owned: BotOwnership) -> dict[str, Any]:
+    webhook = find_webhook(db, owned.bot_id)
+    if webhook["webhook_url"] is not None:
+        return webhook
+
+    # The bot's row is locked only when the first read finds no URL, so a test of a saved webhook takes no lock.
+    lock_owned_bot(db, owned)
+
+    return find_webhook(db, owned.bot_id)
+
+
+def find_webhook(db: Database, bot_id: UUID) -> dict[str, Any]:
+    return db.execute(
+        "SELECT id AS bot_id, webhook_url, webhook_secret_sealed FROM bots WHERE id = %s", (bot_id,)
+    ).fetchone()
 
 
 @router.post("/transactions/{transaction_id}/resend-webhook", status_code=204)
@@ -90,21 +115,15 @@ def resend_webhook(transaction_id: UUID, user: LoggedInUser, db: Database, now: 
 
     transaction = db.execute(
         """
-        SELECT t.id, t.user_id, t.from_currency_id, t.to_currency_id, t.amount, t.payout, t.status,
-            t.submitted_at, t.handled_at, b.webhook_url
-        FROM transactions t
-        JOIN currencies c ON c.id = t.to_currency_id
-        JOIN bots b ON b.id = c.bot_id
-        WHERE t.id = %s
-        FOR UPDATE OF t
+        SELECT id, user_id, from_currency_id, to_currency_id, amount, payout, status, submitted_at, handled_at
+        FROM transactions
+        WHERE id = %s
+        FOR UPDATE
         """,
         (transaction_id,),
     ).fetchone()
     if transaction["status"] != "Pending":
         raise ApiError(400, "Only Pending transactions can be resent.")
-
-    if transaction["webhook_url"] is None:
-        raise ApiError(400, "Add a webhook URL before resending. Your bot can still poll for this transaction.")
 
     enqueue_webhook(db, transaction, "resend", now)
 
@@ -198,6 +217,8 @@ def regenerate_api_token(owned: OwnedBotForWrite, db: Database) -> ApiToken:
 def set_webhook_url(owned: OwnedBotForWrite, body: WebhookUrlUpdate, db: Database) -> None:
     url = checked_webhook_url(body.webhook_url)
 
+    lock_feed(db, owned.bot_id)
+
     updated = db.execute(
         "UPDATE bots SET webhook_url = %s WHERE id = %s AND webhook_secret_sealed IS NOT NULL RETURNING id",
         (url, owned.bot_id),
@@ -205,9 +226,12 @@ def set_webhook_url(owned: OwnedBotForWrite, body: WebhookUrlUpdate, db: Databas
     if updated is None:
         raise ApiError(400, "Generate a webhook secret first, so Discoin can sign each webhook.", "webhookUrl")
 
+    clear_feed(db, owned.bot_id)
+
 
 @router.delete("/bots/{bot_id}/webhook-url", status_code=204)
 def remove_webhook_url(owned: OwnedBotForWrite, db: Database) -> None:
+    lock_feed(db, owned.bot_id)
     db.execute("UPDATE bots SET webhook_url = NULL WHERE id = %s", (owned.bot_id,))
 
 

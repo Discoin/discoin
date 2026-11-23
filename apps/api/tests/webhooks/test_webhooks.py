@@ -21,11 +21,13 @@ from tests.factories import (
     USER_ID,
     bot_of,
     create_botless_currency,
+    feed_events,
     log_in,
 )
 from tests.webhooks.receiver import BOX, HOOK_URL, Receiver, connect_webhook
 
 NIL_UUID = "00000000-0000-0000-0000-000000000000"
+RETRY_WAITS = [timedelta(minutes=minutes) for minutes in (1, 2, 4, 8, 16, 32, 64)]
 
 
 def bot_token(connection: psycopg.Connection, currency_id: UUID) -> str:
@@ -66,11 +68,11 @@ def refuse_connection(request: httpx.Request) -> httpx.Response:
     raise httpx.ConnectError("connection refused", request=request)
 
 
-def test_retry_schedule_doubles_from_ten_seconds_up_to_an_hour() -> None:
-    delays = [retry_delay(failed).total_seconds() for failed in range(1, 11)]
+def test_retry_schedule_doubles_from_one_minute_to_127_minutes_in_total() -> None:
+    delays = [retry_delay(failed) for failed in range(1, 8)]
 
-    assert delays == [10, 20, 40, 80, 160, 320, 640, 1280, 2560, 3600]
-    assert sum(delays) / 3600 == pytest.approx(2.42, abs=0.01)
+    assert delays == RETRY_WAITS
+    assert sum(delays, timedelta()) == timedelta(minutes=127)
 
 
 def test_new_transaction_is_delivered_signed(
@@ -146,18 +148,18 @@ def test_failed_delivery_is_retried_on_schedule(
     receiver = Receiver([500, 200])
 
     deliver_due_webhooks(connection, receiver.sender(), NOW)
-    deliver_due_webhooks(connection, receiver.sender(), NOW + timedelta(seconds=9))
+    deliver_due_webhooks(connection, receiver.sender(), NOW + timedelta(seconds=59))
     retry = delivery_states(connection)[0]
-    deliver_due_webhooks(connection, receiver.sender(), NOW + timedelta(seconds=10))
+    deliver_due_webhooks(connection, receiver.sender(), NOW + timedelta(minutes=1))
 
     assert retry["state"] == "pending"
     assert retry["last_status"] == 500
-    assert retry["next_attempt_at"] == NOW + timedelta(seconds=10)
+    assert retry["next_attempt_at"] == NOW + timedelta(minutes=1)
     assert len(receiver.requests) == 2
     assert delivery_states(connection)[0]["state"] == "delivered"
 
 
-def test_delivery_stops_after_ten_retries_and_leaves_the_transaction(
+def test_delivery_makes_eight_attempts_on_the_schedule_then_stops_and_leaves_the_transaction(
     client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID]
 ) -> None:
     rich, poor = pair
@@ -165,10 +167,18 @@ def test_delivery_stops_after_ten_retries_and_leaves_the_transaction(
     created = convert(client, connection, rich, poor)
     receiver = Receiver([503])
     moment = NOW
+    waits = []
 
-    for _ in range(15):
+    for _ in RETRY_WAITS:
         deliver_due_webhooks(connection, receiver.sender(), moment)
-        moment += timedelta(hours=1)
+        retry = delivery_states(connection)[0]
+        deliver_due_webhooks(connection, receiver.sender(), retry["next_attempt_at"] - timedelta(seconds=1))
+        waits.append(retry["next_attempt_at"] - moment)
+        moment = retry["next_attempt_at"]
+
+    before_the_last_attempt = (retry["state"], len(receiver.requests))
+    deliver_due_webhooks(connection, receiver.sender(), moment)
+    deliver_due_webhooks(connection, receiver.sender(), moment + timedelta(days=1))
 
     final = delivery_states(connection)[0]
     pending = client.get(
@@ -177,8 +187,10 @@ def test_delivery_stops_after_ten_retries_and_leaves_the_transaction(
         headers={"Authorization": f"Bearer {bot_token(connection, poor)}"},
     )
 
-    assert len(receiver.requests) == 11
-    assert (final["state"], final["attempt"]) == ("exhausted", 11)
+    assert waits == RETRY_WAITS
+    assert before_the_last_attempt == ("pending", 7)
+    assert len(receiver.requests) == 8
+    assert (final["state"], final["attempt"]) == ("exhausted", 8)
     assert [transaction["id"] for transaction in pending.json()] == [created["id"]]
 
 
@@ -246,15 +258,20 @@ def test_owner_resends_a_pending_transaction(
     assert [delivery["event"] for delivery in delivery_states(connection)] == ["created", "resend"]
 
 
-def test_resend_needs_a_webhook_url(client: TestClient, connection: psycopg.Connection, pair: tuple) -> None:
+def test_resend_without_a_webhook_url_adds_a_feed_event(
+    client: TestClient, connection: psycopg.Connection, pair: tuple
+) -> None:
     rich, poor = pair
     created = convert(client, connection, rich, poor)
     log_in(client, connection, OWNER_ID)
 
     response = client.post(f"/transactions/{created['id']}/resend-webhook")
 
-    assert response.status_code == 400
-    assert response.json()["message"].startswith("Add a webhook URL")
+    resent = connection.execute("SELECT payload FROM bot_events WHERE id = 2").fetchone()["payload"]
+    assert response.status_code == 204
+    assert feed_events(connection, bot_of(connection, poor)) == [(1, "transaction.created"), (2, "transaction.created")]
+    assert resent["transaction"]["id"] == created["id"]
+    assert delivery_states(connection) == []
 
 
 def test_resend_only_pending(client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID]) -> None:
@@ -341,10 +358,30 @@ def test_test_webhook_reports_a_failing_endpoint(
     assert response.json()["message"].startswith(message)
 
 
-def test_test_webhook_needs_a_saved_url(client: TestClient, connection: psycopg.Connection, pair: tuple) -> None:
+def test_test_without_a_webhook_url_adds_a_feed_event(
+    client: TestClient, connection: psycopg.Connection, pair: tuple
+) -> None:
     _, poor = pair
+    receiver = Receiver([204])
+    use_receiver(client, receiver)
     log_in(client, connection, OWNER_ID)
 
     response = client.post(f"/bots/{bot_of(connection, poor)}/webhook-test")
 
-    assert (response.status_code, response.json()["field"]) == (400, "webhookUrl")
+    stored = connection.execute("SELECT id, event, payload FROM bot_events").fetchall()
+    assert (response.status_code, response.json()) == (200, {"status": None})
+    assert [(event["id"], event["event"]) for event in stored] == [(1, "transaction.test")]
+    assert stored[0]["payload"]["event"] == "transaction.test"
+    assert {**stored[0]["payload"]["transaction"], "id": None, "submittedAt": None} == {
+        "id": None,
+        "userId": OWNER_ID,
+        "fromCurrencyId": NIL_UUID,
+        "toCurrencyId": NIL_UUID,
+        "amount": 100.0,
+        "payout": 10.0,
+        "status": "Pending",
+        "submittedAt": None,
+        "handledAt": None,
+    }
+    assert receiver.requests == []
+    assert delivery_states(connection) == []

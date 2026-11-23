@@ -232,10 +232,14 @@ def test_openapi_lists_only_the_endpoints_bots_use(client: TestClient) -> None:
         "/currencies/{abbreviation}",
         "/currencies/{currency_id}/history",
         "/currencies/{currency_id}/transactions",
+        "/events",
+        "/events/ack",
         "/quote",
         "/transactions",
         "/transactions/pending",
+        "/transactions/undone",
         "/transactions/{transaction_id}",
+        "/transactions/{transaction_id}/handled",
     ]
     assert sorted(paths["/transactions"]) == ["get", "post"]
     assert sorted(paths["/transactions/{transaction_id}"]) == ["patch"]

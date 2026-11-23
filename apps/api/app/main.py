@@ -16,6 +16,7 @@ from app.auth import routes as auth_routes
 from app.auth.discord import DiscordOAuth
 from app.auth.sessions import SESSION_COOKIE, hash_secret
 from app.blocking import routes as blocking_routes
+from app.bots import events as event_routes
 from app.bots import routes as bot_routes
 from app.core.config import Settings
 from app.core.errors import error_response, install_error_handlers
@@ -43,6 +44,7 @@ BOT_FACING_ROUTES = (
     currency_routes,
     transaction_routes,
     bot_routes,
+    event_routes,
 )
 DASHBOARD_ROUTES = (
     auth_routes,

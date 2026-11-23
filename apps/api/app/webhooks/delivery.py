@@ -14,14 +14,14 @@ from psycopg import Connection
 from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
+from app.bots.feed import add_event, lock_feed
 from app.core.secret_box import SecretBox
 from app.transactions.models import WebhookTransaction
 
 SECRET_PREFIX = "whsec_"
 SIGNATURE_HEADER = "Discoin-Signature"
-FIRST_RETRY_DELAY = timedelta(seconds=10)
-LONGEST_RETRY_DELAY = timedelta(hours=1)
-MAX_RETRIES = 10
+FIRST_RETRY_DELAY = timedelta(minutes=1)
+MAX_RETRIES = 7
 ERROR_TEXT_LIMIT = 500
 
 EVENTS = {
@@ -88,24 +88,37 @@ def enqueue_webhook(
     if trigger is not None:
         payload["triggeredBy"] = trigger.as_json()
 
+    receiver = db.execute(
+        "SELECT bot_id FROM currencies WHERE id = %s AND removed_at IS NULL AND bot_id IS NOT NULL",
+        (transaction["to_currency_id"],),
+    ).fetchone()
+    if receiver is None:
+        return
+
+    lock_feed(db, receiver["bot_id"])
+
+    if not has_webhook_url(db, receiver["bot_id"]):
+        add_event(db, receiver["bot_id"], payload, now)
+
+        return
+
     db.execute(
         """
         INSERT INTO webhook_deliveries (transaction_id, currency_id, event, payload, next_attempt_at)
-        SELECT %(transaction_id)s, c.id, %(event)s, %(payload)s, %(now)s
-        FROM currencies c JOIN bots b ON b.id = c.bot_id
-        WHERE c.id = %(currency_id)s AND c.removed_at IS NULL AND b.webhook_url IS NOT NULL
+        VALUES (%s, %s, %s, %s, %s)
         """,
-        {
-            "transaction_id": transaction["id"],
-            "currency_id": transaction["to_currency_id"],
-            "event": event,
-            "payload": Jsonb(payload),
-            "now": now,
-        },
+        (transaction["id"], transaction["to_currency_id"], event, Jsonb(payload), now),
     )
 
 
-def build_test_delivery(webhook: dict[str, Any], user_id: str, now: datetime) -> dict[str, Any]:
+def has_webhook_url(db: Connection[DictRow], bot_id: UUID) -> bool:
+    # A separate statement on purpose: joined into the locking query, it would read the URL from before the lock came.
+    bot = db.execute("SELECT webhook_url IS NOT NULL AS has_webhook_url FROM bots WHERE id = %s", (bot_id,)).fetchone()
+
+    return bot["has_webhook_url"]
+
+
+def build_test_payload(user_id: str, now: datetime) -> dict[str, Any]:
     transaction = WebhookTransaction(
         id=uuid7(),
         user_id=user_id,
@@ -118,13 +131,7 @@ def build_test_delivery(webhook: dict[str, Any], user_id: str, now: datetime) ->
         handled_at=None,
     )
 
-    return {
-        "id": TEST_DELIVERY_ID,
-        "bot_id": webhook["bot_id"],
-        "webhook_url": webhook["webhook_url"],
-        "webhook_secret_sealed": webhook["webhook_secret_sealed"],
-        "payload": {"event": TEST_EVENT, "transaction": transaction.model_dump(mode="json")},
-    }
+    return {"event": TEST_EVENT, "transaction": transaction.model_dump(mode="json")}
 
 
 def drop_pending_deliveries(db: Connection[DictRow], bot_id: UUID, reason: str) -> None:
@@ -138,7 +145,7 @@ def drop_pending_deliveries(db: Connection[DictRow], bot_id: UUID, reason: str) 
 
 
 def retry_delay(failed_attempts: int) -> timedelta:
-    return min(FIRST_RETRY_DELAY * 2 ** (failed_attempts - 1), LONGEST_RETRY_DELAY)
+    return FIRST_RETRY_DELAY * 2 ** (failed_attempts - 1)
 
 
 def signature(secret: str, body: bytes) -> str:
