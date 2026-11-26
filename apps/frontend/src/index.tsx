@@ -15,6 +15,7 @@ import { Admin } from "./pages/Admin/index.jsx";
 import { BotOwner } from "./pages/BotOwner/index.jsx";
 import { CurrencyPage } from "./pages/Currency/index.jsx";
 import { Dashboard } from "./pages/Dashboard/index.jsx";
+import { Docs } from "./pages/Docs/index.jsx";
 import { MyTransactions } from "./pages/MyTransactions/index.jsx";
 import { NotFound } from "./pages/_404.jsx";
 import { Privacy } from "./pages/Privacy/index.jsx";
@@ -43,6 +44,7 @@ export function App() {
             <Route path="/owner" component={BotOwner} />
             <Route path="/admin" component={Admin} />
             <Route path="/privacy" component={Privacy} />
+            <Route path="/docs" component={Docs} />
             <Route default component={NotFound} />
           </Router>
         </main>

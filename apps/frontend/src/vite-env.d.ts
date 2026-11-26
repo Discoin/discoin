@@ -1,9 +1,5 @@
 /// <reference types="vite/client" />
 
-interface ImportMetaEnv {
-  readonly VITE_API_MODE: string;
-}
-
-interface ImportMeta {
-  readonly env: ImportMetaEnv;
+declare module "virtual:api-implementation" {
+  export function createApi(): import("./api/client.js").DiscoinApi;
 }

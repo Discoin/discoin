@@ -75,14 +75,3 @@
     color: var(--ink);
   }
 }
-
-.quote__inactive {
-  margin-left: var(--space-2);
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-control);
-  color: var(--ink-muted);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  vertical-align: middle;
-}

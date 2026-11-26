@@ -165,7 +165,7 @@ test("Resources in the drawer starts collapsed and expands to API Docs before Lo
   const docs = view.getByRole("link", { name: "API Docs" });
   expect(resources.getAttribute("aria-expanded")).toBe("true");
   expect(resources.getAttribute("aria-controls")).toBe(docs.closest("ul")?.id);
-  expect(docs.getAttribute("href")).toBe("/api/docs");
+  expect(docs.getAttribute("href")).toBe("/docs");
   expect(focusables().slice(-3)).toEqual([
     resources,
     docs,

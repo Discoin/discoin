@@ -13,7 +13,7 @@ test("the footer link opens the Privacy and cookies page", async ({ page }) => {
   await openPage(page, "/");
 
   await page
-    .getByRole("navigation", { name: "Legal" })
+    .getByRole("navigation", { name: "Site links" })
     .getByRole("link", { name: PAGE_NAME })
     .click();
 

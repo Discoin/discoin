@@ -226,7 +226,7 @@ export function createHttpApi(): DiscoinApi {
     removeWebhookUrl: (botId) =>
       command("DELETE", `/bots/${segment(botId)}/webhook-url`),
     testWebhook: async (botId) => {
-      const result = await request<{ status: number }>(
+      const result = await request<{ status: number | null }>(
         "POST",
         `/bots/${segment(botId)}/webhook-test`,
       );
