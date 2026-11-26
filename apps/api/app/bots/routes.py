@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -25,6 +26,7 @@ from app.transactions.queries import (
     mark_undone_handled,
     returning_with_currencies,
 )
+from app.webhooks.webhook_tests import LiveTestLookup, MarkedStatus, lock_live_test, mark_test
 
 router = APIRouter(prefix="/transactions", tags=["bots"])
 
@@ -93,6 +95,10 @@ def put_transaction_handled(transaction_id: UUID, bot: CallingBotId, db: Databas
 def patch_transaction(
     transaction_id: UUID, body: TransactionUpdate, bot: CallingBotId, db: Database, now: Now
 ) -> BotTransaction:
+    test = lock_live_test(db, LiveTestLookup(test_id=transaction_id, bot_id=bot, now=now))
+    if test is not None:
+        return mark_pending_test(db, test, body.status, now)
+
     transaction = lock_pending(db, require_received_by(db, transaction_id, bot))
 
     if body.status == "Refunded":
@@ -104,6 +110,19 @@ def patch_transaction(
     ).fetchone()
 
     return BotTransaction.model_validate(completed)
+
+
+def mark_pending_test(
+    db: Connection[DictRow], test: dict[str, Any], status: MarkedStatus, now: datetime
+) -> BotTransaction:
+    if test["marked_status"] is not None:
+        raise only_pending_can_be_marked()
+
+    return mark_test(db, test["id"], status, now)
+
+
+def only_pending_can_be_marked() -> ApiError:
+    return ApiError(400, "Only Pending transactions can be marked Completed or Refunded.", "status")
 
 
 def require_bot_currency(db: Connection[DictRow], claim: BotCurrency) -> UUID:
@@ -159,6 +178,6 @@ def lock_pending(db: Connection[DictRow], transaction: dict[str, Any]) -> dict[s
         f"SELECT {BOT_TRANSACTION_COLUMNS} FROM transactions WHERE id = %s FOR UPDATE", (transaction["id"],)
     ).fetchone()
     if locked["status"] != "Pending":
-        raise ApiError(400, "Only Pending transactions can be marked Completed or Refunded.", "status")
+        raise only_pending_can_be_marked()
 
     return locked

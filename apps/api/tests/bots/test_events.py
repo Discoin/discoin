@@ -21,10 +21,11 @@ EVERY_KIND_IN_THE_FEED = [
     (1, "transaction.created"),
     (2, "transaction.created"),
     (3, "transaction.created"),
-    (4, "transaction.test"),
+    (4, "transaction.created"),
     (5, "transaction.cancelled"),
     (6, "transaction.reversed"),
 ]
+ONLY_THE_FOURTH_IS_A_TEST = [False, False, False, True, False, False]
 EVERY_KIND_AS_DELIVERIES = ["created", "created", "resend", "cancelled", "reversed"]
 
 Headers = dict[str, str]
@@ -120,6 +121,7 @@ def test_an_event_is_the_webhook_body_with_amounts_as_numbers(market: Market) ->
             {
                 "id": 1,
                 "event": "transaction.created",
+                "test": False,
                 "transaction": {
                     "id": created["id"],
                     "userId": USER_ID,
@@ -142,6 +144,7 @@ def test_events_come_back_in_id_order_across_every_kind(market: Market) -> None:
     events = market.read().json()["events"]
 
     assert [(event["id"], event["event"]) for event in events] == EVERY_KIND_IN_THE_FEED
+    assert [event["test"] for event in events] == ONLY_THE_FOURTH_IS_A_TEST
     assert [event.get("triggeredBy") for event in events[4:]] == [{"kind": "admins"}, {"kind": "admins"}]
 
 
@@ -159,7 +162,9 @@ def test_with_a_webhook_url_every_event_goes_to_the_webhook_only(market: Market)
 
     market.cause_every_kind_of_event()
 
+    queued = market.connection.execute("SELECT payload FROM webhook_deliveries").fetchall()
     assert market.deliveries() == EVERY_KIND_AS_DELIVERIES
+    assert [delivery["payload"]["test"] for delivery in queued] == [False] * len(EVERY_KIND_AS_DELIVERIES)
     assert len(test_receiver.requests) == 1
     assert market.stored_events() == []
     assert market.position() == {"last_event_id": 0, "acknowledged_event_id": 0}

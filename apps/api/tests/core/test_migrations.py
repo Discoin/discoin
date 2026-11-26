@@ -5,6 +5,7 @@ from uuid import UUID
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 
 from app.core.migrations import MIGRATIONS_DIRECTORY, MigrationError, apply_migrations
 
@@ -344,6 +345,52 @@ def test_undone_handled_migration_adds_two_nullable_columns_and_leaves_rows_unto
     assert after == {**before, "receiver_handled_at": None, "sender_handled_at": None}
     assert added <= {row["column_name"] for row in nullable}
     assert added & set(before) == set()
+
+
+def test_webhook_tests_migration_adds_test_false_to_stored_payloads_that_lack_it(
+    connection: psycopg.Connection, tmp_path: Path
+) -> None:
+    bot = "019a8000-0000-7000-8000-000000000041"
+    insert_event = "INSERT INTO bot_events (bot_id, id, event, payload, created_at) VALUES (%s, %s, 'e', %s, now())"
+    insert_delivery = """
+        INSERT INTO webhook_deliveries (transaction_id, currency_id, event, payload, next_attempt_at)
+        VALUES (%s, %s, 'created', %s, now())
+    """
+
+    for migration in sorted(MIGRATIONS_DIRECTORY.glob("000[1-6]_*.sql")):
+        shutil.copy(migration, tmp_path / migration.name)
+
+    apply_migrations(connection, tmp_path)
+    connection.execute(
+        "INSERT INTO bots (id, name, discord_id, owner_id) VALUES (%s, 'Oat bot', '400000000000000004', %s)",
+        (bot, BLOCKED_USER),
+    )
+    connection.execute(
+        """
+        INSERT INTO currencies (id, name, abbreviation, reserve, weekly_median, multiplier)
+        VALUES (%s, 'Oats', 'OAT', 100000, 25000, 4), (%s, 'Gems', 'GEM', 100000, 25000, 4)
+        """,
+        (OATS, GEMS),
+    )
+    connection.execute(
+        """
+        INSERT INTO transactions (id, user_id, from_currency_id, to_currency_id, amount, payout, status, submitted_at)
+        VALUES (%s, %s, %s, %s, 100, 10, 'Pending', now())
+        """,
+        (PENDING_ID, BLOCKED_USER, GEMS, OATS),
+    )
+    connection.execute(insert_event, (bot, 1, Jsonb({"event": "transaction.created"})))
+    connection.execute(insert_event, (bot, 2, Jsonb({"event": "transaction.created", "test": True})))
+    connection.execute(insert_delivery, (PENDING_ID, OATS, Jsonb({"event": "transaction.created"})))
+    connection.execute(insert_delivery, (PENDING_ID, OATS, Jsonb({"event": "transaction.created", "test": True})))
+
+    apply_migrations(connection, MIGRATIONS_DIRECTORY)
+
+    events = connection.execute("SELECT payload FROM bot_events ORDER BY id").fetchall()
+    deliveries = connection.execute("SELECT payload FROM webhook_deliveries ORDER BY id").fetchall()
+    backfilled = [{"event": "transaction.created", "test": False}, {"event": "transaction.created", "test": True}]
+    assert [row["payload"] for row in events] == backfilled
+    assert [row["payload"] for row in deliveries] == backfilled
 
 
 def test_needs_autocommit_connection(database_url: str, tmp_path: Path) -> None:

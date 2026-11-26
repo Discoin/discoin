@@ -16,7 +16,7 @@ from app.bots.feed import RETENTION, lock_feed, purge_expired_events
 from app.core.errors import ApiError
 from app.owners.access import BotOwnership, lock_owned_bot
 from app.owners.routes import (
-    WebhookTestResult,
+    StartedWebhookTest,
     WebhookUrlUpdate,
     remove_webhook_url,
     resend_webhook,
@@ -369,14 +369,14 @@ def test_a_test_requested_during_a_url_save_goes_to_the_webhook(
     owned = BotOwnership(bot_id=bot_of(connection, oats), owner_id=OWNER_ID)
     give_a_webhook_secret(connection, owned.bot_id)
     receiver = Receiver([200])
-    results: list[WebhookTestResult] = []
+    started: list[StartedWebhookTest] = []
 
     def send_test(db: psycopg.Connection) -> None:
-        results.append(send_test_webhook(owned, receiver.sender(), db, NOW))
+        started.append(send_test_webhook(owned, receiver.sender(), db, NOW))
 
     run_second_while_first_is_uncommitted(database_url, connection, save_url(owned), send_test)
 
-    assert results == [WebhookTestResult(status=200)]
+    assert [test.path for test in started] == ["webhook"]
     assert len(receiver.requests) == 1
     assert feed_events(connection, owned.bot_id) == []
 

@@ -2,7 +2,7 @@ import ipaddress
 from decimal import Decimal
 from typing import Annotated, Any
 from urllib.parse import urlsplit
-from uuid import UUID
+from uuid import UUID, uuid7
 
 from fastapi import APIRouter, Depends, Request
 from psycopg import sql
@@ -33,12 +33,21 @@ from app.owners.access import (
 )
 from app.transactions.models import BotTransaction
 from app.transactions.queries import list_pending_into_bot
-from app.webhooks.delivery import (
+from app.webhooks.delivery import Outcome, WebhookSender, enqueue_webhook, issue_webhook_secret
+from app.webhooks.webhook_tests import (
+    FEED_PATH,
     TEST_DELIVERY_ID,
-    WebhookSender,
-    build_test_payload,
-    enqueue_webhook,
-    issue_webhook_secret,
+    WEBHOOK_PATH,
+    LiveTestLookup,
+    MarkedStatus,
+    TestPath,
+    TestState,
+    WebhookTest,
+    delete_test,
+    find_live_test_progress,
+    record_feed_test,
+    record_webhook_test,
+    state_of,
 )
 
 CURRENCY_ID = "currency_id"
@@ -59,33 +68,61 @@ def webhook_sender(request: Request) -> WebhookSender:
     return request.app.state.webhook_sender
 
 
-class WebhookTestResult(CamelModel):
-    status: int | None
+class StartedWebhookTest(CamelModel):
+    test_id: UUID
+    path: TestPath
 
 
-@router.post("/bots/{bot_id}/webhook-test")
+class WebhookTestProgress(CamelModel):
+    state: TestState
+    path: TestPath
+    marked_status: MarkedStatus | None
+
+
+@router.post("/bots/{bot_id}/webhook-test", status_code=202)
 def send_test_webhook(
     owned: OwnedBot,
     sender: Annotated[WebhookSender, Depends(webhook_sender)],
     db: Database,
     now: Now,
-) -> WebhookTestResult:
-    payload = build_test_payload(owned.owner_id, now)
+) -> StartedWebhookTest:
+    test = WebhookTest(id=uuid7(), bot_id=owned.bot_id, owner_id=owned.owner_id, submitted_at=now)
 
     webhook = find_webhook_locking_a_missing_url(db, owned)
     if webhook["webhook_url"] is None:
-        add_event(db, owned.bot_id, payload, now)
+        record_feed_test(db, test, add_event(db, owned.bot_id, test.payload(), now))
 
-        return WebhookTestResult(status=None)
+        return StartedWebhookTest(test_id=test.id, path=FEED_PATH)
 
-    outcome = sender.send({"id": TEST_DELIVERY_ID, **webhook, "payload": payload})
-    if outcome.status is None:
-        raise ApiError(502, f"Discoin couldn't reach your webhook. {outcome.error}")
+    record_webhook_test(db, test)
+    # Committed before sending, so a bot that marks the test while it handles the webhook finds the test.
+    db.commit()
 
+    outcome = sender.send({"id": TEST_DELIVERY_ID, **webhook, "payload": test.payload()})
     if not outcome.succeeded:
-        raise ApiError(502, f"Your webhook answered {outcome.status}. Discoin expects a 2xx answer.")
+        delete_test(db, test.id)
+        # Committed here because the error below rolls back the rest of the request.
+        db.commit()
 
-    return WebhookTestResult(status=outcome.status)
+        raise webhook_test_failure(outcome)
+
+    return StartedWebhookTest(test_id=test.id, path=WEBHOOK_PATH)
+
+
+def webhook_test_failure(outcome: Outcome) -> ApiError:
+    if outcome.status is None:
+        return ApiError(502, f"Discoin couldn't reach your webhook. {outcome.error}")
+
+    return ApiError(502, f"Your webhook answered {outcome.status}. Discoin expects a 2xx answer.")
+
+
+@router.get("/bots/{bot_id}/webhook-test/{test_id}")
+def get_webhook_test(test_id: UUID, owned: OwnedBot, db: Database, now: Now) -> WebhookTestProgress:
+    progress = find_live_test_progress(db, LiveTestLookup(test_id=test_id, bot_id=owned.bot_id, now=now))
+    if progress is None:
+        raise not_found("webhook test")
+
+    return WebhookTestProgress(state=state_of(progress), path=progress["path"], marked_status=progress["marked_status"])
 
 
 def find_webhook_locking_a_missing_url(db: Database, owned: BotOwnership) -> dict[str, Any]:

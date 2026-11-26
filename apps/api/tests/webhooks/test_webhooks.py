@@ -89,6 +89,7 @@ def test_new_transaction_is_delivered_signed(
     body = verified_body(request, secret)
     assert str(request.url) == HOOK_URL
     assert body["event"] == "transaction.created"
+    assert body["test"] is False
     assert body["transaction"]["id"] == created["id"]
     assert body["transaction"]["userId"] == USER_ID
     assert delivery_states(connection)[0]["state"] == "delivered"
@@ -323,8 +324,9 @@ def test_owner_sends_a_signed_test_webhook_for_the_bot(
     counts = connection.execute(
         "SELECT (SELECT count(*) FROM transactions) AS transactions, (SELECT count(*) FROM webhook_deliveries) AS deliveries"
     ).fetchone()
-    assert (response.status_code, response.json()) == (200, {"status": 204})
-    assert body["event"] == "transaction.test"
+    assert response.status_code == 202
+    assert response.json() == {"testId": body["transaction"]["id"], "path": "webhook"}
+    assert (body["id"], body["event"], body["test"]) == (0, "transaction.created", True)
     assert (body["transaction"]["fromCurrencyId"], body["transaction"]["toCurrencyId"]) == (NIL_UUID, NIL_UUID)
     assert body["transaction"]["userId"] == OWNER_ID
     assert counts == {"transactions": 0, "deliveries": 0}
@@ -354,8 +356,32 @@ def test_test_webhook_reports_a_failing_endpoint(
 
     response = client.post(f"/bots/{bot_of(connection, poor)}/webhook-test")
 
+    kept = connection.execute("SELECT count(*) AS tests FROM webhook_tests").fetchone()
     assert response.status_code == 502
     assert response.json()["message"].startswith(message)
+    assert kept == {"tests": 0}
+
+
+def test_the_test_is_saved_before_the_webhook_is_sent_so_the_bot_can_mark_it_at_once(
+    client: TestClient, connection: psycopg.Connection, pair: tuple[UUID, UUID]
+) -> None:
+    _, poor = pair
+    connect_webhook(connection, poor)
+    saved_when_sent: list[dict] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        saved_when_sent.append(connection.execute("SELECT id::text FROM webhook_tests").fetchone())
+
+        return httpx.Response(204)
+
+    client.app.dependency_overrides[webhook_sender] = lambda: WebhookSender(
+        httpx.Client(transport=httpx.MockTransport(answer)), BOX
+    )
+    log_in(client, connection, OWNER_ID)
+
+    response = client.post(f"/bots/{bot_of(connection, poor)}/webhook-test")
+
+    assert saved_when_sent == [{"id": response.json()["testId"]}]
 
 
 def test_test_without_a_webhook_url_adds_a_feed_event(
@@ -369,19 +395,23 @@ def test_test_without_a_webhook_url_adds_a_feed_event(
     response = client.post(f"/bots/{bot_of(connection, poor)}/webhook-test")
 
     stored = connection.execute("SELECT id, event, payload FROM bot_events").fetchall()
-    assert (response.status_code, response.json()) == (200, {"status": None})
-    assert [(event["id"], event["event"]) for event in stored] == [(1, "transaction.test")]
-    assert stored[0]["payload"]["event"] == "transaction.test"
-    assert {**stored[0]["payload"]["transaction"], "id": None, "submittedAt": None} == {
-        "id": None,
-        "userId": OWNER_ID,
-        "fromCurrencyId": NIL_UUID,
-        "toCurrencyId": NIL_UUID,
-        "amount": 100.0,
-        "payout": 10.0,
-        "status": "Pending",
-        "submittedAt": None,
-        "handledAt": None,
+    test_id = response.json()["testId"]
+    assert (response.status_code, response.json()) == (202, {"testId": test_id, "path": "feed"})
+    assert [(event["id"], event["event"]) for event in stored] == [(1, "transaction.created")]
+    assert stored[0]["payload"] == {
+        "event": "transaction.created",
+        "test": True,
+        "transaction": {
+            "id": test_id,
+            "userId": OWNER_ID,
+            "fromCurrencyId": NIL_UUID,
+            "toCurrencyId": NIL_UUID,
+            "amount": 100.0,
+            "payout": 10.0,
+            "status": "Pending",
+            "submittedAt": "2026-11-13T12:00:00Z",
+            "handledAt": None,
+        },
     }
     assert receiver.requests == []
     assert delivery_states(connection) == []

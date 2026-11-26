@@ -24,6 +24,8 @@ import type {
   Transaction,
   TransactionRecord,
   TransactionStatus,
+  WebhookTestPath,
+  WebhookTestProgress,
 } from "../api/types.js";
 import { hasAtMostCents, MAX_SEND_AMOUNT } from "../lib/converter.js";
 import {
@@ -83,7 +85,7 @@ const DAY_MS = 86_400_000;
 const DISCORD_ID_PATTERN = /^\d{17,20}$/;
 const ABBREVIATION_PATTERN = /^[A-Z]{3,4}$/;
 const SECRET_PREFIX = "whsec_";
-const MOCK_WEBHOOK_STATUS = 200;
+const MOCK_MARKED_STATUS = "Completed";
 const SAMPLE_AVATAR =
   "data:image/svg+xml," +
   encodeURIComponent(
@@ -122,6 +124,12 @@ interface MockState {
   globalBlocks: BlockedUser[];
   admins: AdminUser[];
   loggedIn: boolean;
+  webhookTests: Record<string, MockWebhookTest>;
+}
+
+interface MockWebhookTest {
+  botId: string;
+  path: WebhookTestPath;
 }
 
 function initialState(): MockState {
@@ -156,6 +164,7 @@ function sampleState(): MockState {
     globalBlocks: sampleGlobalBlocks,
     admins: sampleAdmins,
     loggedIn: true,
+    webhookTests: {},
   });
 }
 
@@ -1160,10 +1169,29 @@ export function createMockApi(): DiscoinApi {
           webhookUrl: checked,
         }));
       }),
-    testWebhook: (botId) =>
-      respond(() =>
-        ownedBot(botId).webhookUrl === null ? null : MOCK_WEBHOOK_STATUS,
-      ),
+    startWebhookTest: (botId) =>
+      respond(() => {
+        const testId = crypto.randomUUID();
+        const path: WebhookTestPath =
+          ownedBot(botId).webhookUrl === null ? "feed" : "webhook";
+        state.webhookTests[testId] = { botId, path };
+
+        return { testId, path };
+      }),
+    getWebhookTest: (botId, testId) =>
+      respond(() => {
+        ownedBot(botId);
+        const test = lookup(state.webhookTests, testId, "webhook test");
+        if (test.botId !== botId) throw notFound("webhook test");
+
+        const handled: WebhookTestProgress = {
+          state: "handled",
+          path: test.path,
+          markedStatus: MOCK_MARKED_STATUS,
+        };
+
+        return handled;
+      }),
     removeWebhookUrl: (botId) =>
       respond(() => {
         updateOwnedBot(botId, (found) => ({ ...found, webhookUrl: null }));

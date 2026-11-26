@@ -6,6 +6,7 @@ import { Field } from "../../components/shared/Field.jsx";
 import { useAction } from "../../lib/useAction.js";
 import { ShowOnceSecret, type ShowOnceCopy } from "./ShowOnceSecret.jsx";
 import { useUnsavedChanges } from "./unsavedChanges.js";
+import { useWebhookTest } from "./useWebhookTest.js";
 
 const SECRET_COPY: ShowOnceCopy = {
   label: "Webhook secret",
@@ -37,6 +38,9 @@ export function WebhookForm({
   const [savedUrl, setSavedUrl] = useState(initialUrl);
   const [url, setUrl] = useState(initialUrl ?? "");
   const action = useAction();
+  const test = useWebhookTest(botId);
+  const isBusy =
+    action.state.status === "pending" || test.state.status === "waiting";
   useUnsavedChanges("Webhook URL", {
     hasChanges: url.trim() !== (savedUrl ?? ""),
     isSaving: action.state.status === "pending",
@@ -49,17 +53,6 @@ export function WebhookForm({
       setSavedUrl(url.trim());
 
       return "Webhook saved. New transactions go to this URL.";
-    });
-  }
-
-  function sendTest() {
-    void action.run(async () => {
-      const status = await api.testWebhook(botId);
-      if (status === null) {
-        return "Test event added to your event feed. Your bot gets it on its next read.";
-      }
-
-      return `Test sent. Your webhook answered ${status}.`;
     });
   }
 
@@ -91,17 +84,13 @@ export function WebhookForm({
           onInput={(event) => setUrl(event.currentTarget.value)}
         />
         <div class="form-actions">
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={action.state.status === "pending"}
-          >
+          <Button type="submit" variant="primary" disabled={isBusy}>
             Save webhook
           </Button>
           <Button
             variant="secondary"
-            disabled={action.state.status === "pending"}
-            onClick={sendTest}
+            disabled={isBusy}
+            onClick={() => void test.run()}
           >
             Test
             <span class="visually-hidden">
@@ -109,16 +98,22 @@ export function WebhookForm({
             </span>
           </Button>
           {savedUrl !== null && (
-            <Button
-              variant="outline"
-              disabled={action.state.status === "pending"}
-              onClick={remove}
-            >
+            <Button variant="outline" disabled={isBusy} onClick={remove}>
               Remove webhook
             </Button>
           )}
         </div>
         <ActionStatus state={action.state} inlineFields={["webhookUrl"]} />
+        <p
+          class={
+            test.state.status === "failed"
+              ? "action-status action-status--failed"
+              : "action-status"
+          }
+          role="status"
+        >
+          {test.state.message}
+        </p>
       </form>
     </div>
   );

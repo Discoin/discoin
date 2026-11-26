@@ -17,7 +17,6 @@ import type {
   PendingTransaction,
 } from "../../api/types.js";
 import { SessionProvider } from "../../components/session/SessionProvider.jsx";
-import { toasts } from "../../lib/toasts.js";
 import { NO_ANSWER_MESSAGE } from "../../lib/useAction.js";
 import { BotOwner } from "./index.jsx";
 
@@ -32,7 +31,7 @@ const api = vi.hoisted(() => ({
   setDailyCap: vi.fn(),
   regenerateApiToken: vi.fn(),
   generateWebhookSecret: vi.fn(),
-  testWebhook: vi.fn(),
+  startWebhookTest: vi.fn(),
   listBlocks: vi.fn(),
 }));
 
@@ -698,33 +697,29 @@ test.each([
     name: "a saved webhook URL",
     webhookUrl: "https://harvest.example.com/hook",
     button: /^Test\s?webhook$/,
-    answer: 204,
-    shown: "Test sent. Your webhook answered 204.",
   },
   {
     name: "no webhook URL",
     webhookUrl: null,
     button: /^Test\s?event feed$/,
-    answer: null,
-    shown:
-      "Test event added to your event feed. Your bot gets it on its next read.",
   },
 ])(
-  "Test with $name says where the test event went",
-  async ({ webhookUrl, button, answer, shown }) => {
+  "Test with $name starts a test for the picked bot and says it is sending",
+  async ({ webhookUrl, button }) => {
     api.getBotSettings.mockResolvedValue({
       hasApiToken: true,
       hasWebhookSecret: true,
       webhookUrl,
     });
-    api.testWebhook.mockResolvedValue(answer);
-    const showToast = vi.spyOn(toasts, "show");
+    api.startWebhookTest.mockReturnValue(never());
     await renderPage();
 
     fireEvent.click(screen.getByRole("button", { name: button }));
 
-    await waitFor(() => expect(showToast).toHaveBeenCalledWith(shown));
-    expect(api.testWebhook).toHaveBeenCalledWith("harvest");
+    expect(
+      (await screen.findByText("Sending the test.")).getAttribute("role"),
+    ).toBe("status");
+    expect(api.startWebhookTest).toHaveBeenCalledWith("harvest");
   },
 );
 

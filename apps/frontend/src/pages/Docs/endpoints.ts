@@ -274,7 +274,7 @@ const TRANSACTIONS: EndpointGroup = {
       method: "PATCH",
       path: "/transactions/{id}",
       purpose:
-        "Settles a Pending transaction into one of your bot's currencies. Completed means your bot paid the user. Refunded sends the coins back to the currency they came from.",
+        "Settles a Pending transaction into one of your bot's currencies. Completed means your bot paid the user. Refunded sends the coins back to the currency they came from. It also marks a test event's transaction, which moves no coins.",
       needsToken: true,
       fields: [
         {
@@ -433,6 +433,7 @@ const EVENTS: EndpointGroup = {
           {
             id: 41,
             event: "transaction.created",
+            test: false,
             transaction: WEBHOOK_TRANSACTION,
           },
         ],

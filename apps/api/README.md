@@ -5,7 +5,7 @@ FastAPI and PostgreSQL. Run every task through nx from the repo root.
 | Command | What it does |
 | --- | --- |
 | `npx nx run api:serve` | API on port 8000, reloading on changes |
-| `npx nx run api:worker` | Webhook delivery worker, which also deletes expired feed events |
+| `npx nx run api:worker` | Webhook delivery worker, which also deletes expired feed events and webhook tests |
 | `npx nx run api:seed` | Adds five sample currencies with a month of history |
 | `npx nx run api:test` | pytest against a real PostgreSQL |
 | `npx nx run api:lint` and `api:format-check` | ruff |
@@ -150,11 +150,26 @@ Admins can remove a currency, or a bot together with all of its currencies. Remo
 
 ## Webhooks
 
-Each bot has one webhook URL and one secret. The worker posts each event to the webhook of the receiving currency's bot, so events for all of a bot's currencies go to the same URL; `fromCurrencyId` and `toCurrencyId` in the transaction tell them apart. The body is `{id, event, transaction, triggeredBy?}`, where `event` is `transaction.created`, `transaction.cancelled` or `transaction.reversed`. On events caused by a block, `triggeredBy` is `{kind: "admins"}` or `{kind: "owner", botId}`, naming the bot whose owner blocked the user.
+Each bot has one webhook URL and one secret. The worker posts each event to the webhook of the receiving currency's bot, so events for all of a bot's currencies go to the same URL; `fromCurrencyId` and `toCurrencyId` in the transaction tell them apart. The body is `{id, event, test, transaction, triggeredBy?}`, where `event` is `transaction.created`, `transaction.cancelled` or `transaction.reversed`, and `test` is `false` on every real event and `true` only on a test sent from the Bot owner page. A bot must check `test` before paying out. On events caused by a block, `triggeredBy` is `{kind: "admins"}` or `{kind: "owner", botId}`, naming the bot whose owner blocked the user.
 
 Each request carries `Discoin-Signature: <hex>`. The hex is the HMAC SHA256 of the raw body with the bot's webhook secret. Check it before trusting the request.
 
-The bot owner page has a Test button that sends one `transaction.test` event to the bot's saved URL, signed like a real one, with a made up transaction whose `fromCurrencyId` and `toCurrencyId` are both the nil UUID `00000000-0000-0000-0000-000000000000`. Nothing is saved and no coins move, so bots should check the signature and then ignore it. Resending a Pending transaction's webhook is open to the owner of the bot that receives it. For a bot with no webhook URL, Test and Resend write the event to its event feed instead, and the Test route answers `{status: null}`.
+Resending a Pending transaction's webhook is open to the owner of the bot that receives it. For a bot with no webhook URL, Resend writes the event to its event feed instead.
+
+## Webhook test
+
+The Test button on the Bot owner page checks the whole round trip: the bot gets a `transaction.created` event with `"test": true`, and the test passes once the bot marks the test transaction with `PATCH /transactions/{id}`.
+
+- The event has the body of a real one, signed the same way on a webhook. Its transaction is made up: a new ID for each test, the owner's Discord ID as `userId`, the nil UUID `00000000-0000-0000-0000-000000000000` as `fromCurrencyId` and `toCurrencyId`, amount 100, payout 10, status Pending. On a webhook, its delivery `id` is 0.
+- A bot that ignores `test` pays out on a test. No coins move on Discoin's side, so the bot would be giving its own coins away.
+- `POST /bots/{botId}/webhook-test` answers 202 `{testId, path}`. With a webhook URL, `path` is `webhook` and the event is sent before the route answers. An unreachable webhook or an answer that is not 2xx is a 502 with the reason, and no test is kept. Without a webhook URL, `path` is `feed` and the event is added to the bot's event feed.
+- `GET /bots/{botId}/webhook-test/{testId}` answers `{state, path, markedStatus}`. `state` is `waiting` while a feed test's event is above the bot's acknowledged cursor, `delivered` once the webhook answered 2xx or the feed event is acknowledged, and `handled` once the bot marked the test. `markedStatus` is `Completed` or `Refunded` once handled, and null before.
+- `PATCH /transactions/{id}` on a test, by the tested bot, answers 200 with the test as a transaction: the chosen status, `handledAt` set, and `fromCurrency` and `toCurrency` both `{abbreviation: "TEST", name: "Test", removed: false}`. Balances, the ledger, events and webhooks are left alone. A second PATCH is the usual 400 on `status`.
+- A test lives 10 minutes. After that, and for any other bot, both routes answer 404, the same as for an unknown ID.
+- A test is never a transaction: it is not in `/transactions/pending`, `/transactions/undone` or the transaction detail routes, and `PUT /transactions/{id}/handled` answers 404 for it.
+- The dashboard polls the GET route every 2 seconds for 60 seconds, then reports the step that failed: the bot never read its feed, or it got the test and never marked it.
+
+Tests are rows in `webhook_tests`, which the worker deletes once they expire. On the webhook path the row is committed before the request is sent, so a bot that marks the test while it handles the webhook finds it, and the row is deleted again when the delivery fails. Marking a test locks only its own row, never a currency or a feed.
 
 A delivery gets 8 attempts: the first one and up to 7 retries, waiting 1 minute and doubling each time (1, 2, 4, 8, 16, 32 and 64 minutes, about 2 hours in total). Then it stops, and the transaction stays as it is for the bot to poll with `GET /transactions/pending` and `GET /transactions/undone`. Webhooks only go to public https addresses.
 
@@ -162,7 +177,7 @@ A delivery gets 8 attempts: the first one and up to 7 retries, waiting 1 minute 
 
 A bot with no public address polls for its events instead. A bot uses a webhook or the event feed, never both. Each event is written to one place, chosen when it happens: the webhook queue if the receiving bot has a webhook URL at that moment, the bot's feed if it has none. That holds for `transaction.created`, `transaction.cancelled`, `transaction.reversed`, a resend and a test.
 
-- `GET /events?after=<id>&limit=<n>` answers `{events: [...]}` in `id` order. Each event has the webhook body, `{id, event, transaction, triggeredBy?}`, where `id` counts up per bot. Without `after`, the list starts after the bot's acknowledged cursor; `after` never moves the cursor. `limit` is 1 to 100 and defaults to 100. A full batch means more are waiting.
+- `GET /events?after=<id>&limit=<n>` answers `{events: [...]}` in `id` order. Each event has the webhook body, `{id, event, test, transaction, triggeredBy?}`, where `id` counts up per bot. Without `after`, the list starts after the bot's acknowledged cursor; `after` never moves the cursor. `limit` is 1 to 100 and defaults to 100. A full batch means more are waiting.
 - `POST /events/ack` with `{id}` moves the cursor forward to `id` and answers 204. An `id` at or below the cursor changes nothing. An `id` above the bot's newest event is a 400.
 - While the bot has a webhook URL, both routes answer 409: `This bot has a webhook URL, so its events go to the webhook. Remove the URL on the Bot owner page to read events here.` A client should stop instead of retrying.
 - Checks run in this order: 401 for the token, 409 for the webhook URL, then 422 for `after` or `limit`.

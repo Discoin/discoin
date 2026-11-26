@@ -25,14 +25,14 @@ export interface Action {
   fieldError: (field: string) => string | undefined;
 }
 
-function failureOf(error: unknown): ActionFailure {
+export function failureOf(error: unknown): ActionFailure {
   if (error instanceof ApiError) return error;
   if (error instanceof ConnectionError) return { message: NO_ANSWER_MESSAGE };
 
   return { message: UNEXPECTED_FAILURE_MESSAGE };
 }
 
-function isExpected(error: unknown): boolean {
+export function isExpected(error: unknown): boolean {
   return error instanceof ApiError || error instanceof ConnectionError;
 }
 

@@ -22,8 +22,10 @@ import type {
   ReservePoint,
   ReverseRequest,
   SavedCurrency,
+  StartedWebhookTest,
   Transaction,
   TransactionDetail,
+  WebhookTestProgress,
 } from "./types.js";
 
 export interface BlockListApi {
@@ -73,7 +75,8 @@ export interface DiscoinApi {
   generateWebhookSecret(botId: string): Promise<string>;
   setWebhookUrl(botId: string, url: string): Promise<void>;
   removeWebhookUrl(botId: string): Promise<void>;
-  testWebhook(botId: string): Promise<number | null>;
+  startWebhookTest(botId: string): Promise<StartedWebhookTest>;
+  getWebhookTest(botId: string, testId: string): Promise<WebhookTestProgress>;
   setDailyCap(currencyId: string, cap: number): Promise<void>;
   removeDailyCap(currencyId: string): Promise<void>;
   listPendingTransactions(botId: string): Promise<PendingTransaction[]>;

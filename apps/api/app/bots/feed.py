@@ -6,6 +6,8 @@ from psycopg import Connection
 from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
+from app.webhooks.webhook_tests import delete_expired_tests
+
 RETENTION = timedelta(hours=24)
 
 
@@ -25,7 +27,7 @@ def lock_feeds_receiving(db: Connection[DictRow], to_currency_ids: list[UUID]) -
     )
 
 
-def add_event(db: Connection[DictRow], bot_id: UUID, payload: dict[str, Any], now: datetime) -> None:
+def add_event(db: Connection[DictRow], bot_id: UUID, payload: dict[str, Any], now: datetime) -> int:
     numbered = db.execute(
         "UPDATE bot_feeds SET last_event_id = last_event_id + 1 WHERE bot_id = %s RETURNING last_event_id", (bot_id,)
     ).fetchone()
@@ -33,6 +35,8 @@ def add_event(db: Connection[DictRow], bot_id: UUID, payload: dict[str, Any], no
         "INSERT INTO bot_events (bot_id, id, event, payload, created_at) VALUES (%s, %s, %s, %s, %s)",
         (bot_id, numbered["last_event_id"], payload["event"], Jsonb(payload), now),
     )
+
+    return numbered["last_event_id"]
 
 
 def clear_feed(db: Connection[DictRow], bot_id: UUID) -> None:
@@ -57,3 +61,4 @@ def purge_expired_events(db: Connection[DictRow], now: datetime) -> None:
             "DELETE FROM bot_events WHERE created_at < %s AND bot_id = ANY(%s)",
             (expired_before, [feed["bot_id"] for feed in purgeable]),
         )
+        delete_expired_tests(db, now)

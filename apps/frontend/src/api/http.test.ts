@@ -128,20 +128,24 @@ describe("requests", () => {
       returns: undefined,
     },
     {
-      name: "a webhook test, returning the endpoint's status",
-      call: () => api.testWebhook("b1"),
-      answer: jsonResponse(200, { status: 204 }),
+      name: "a started webhook test, returning its ID and path",
+      call: () => api.startWebhookTest("b1"),
+      answer: jsonResponse(202, { testId: "t1", path: "feed" }),
       method: "POST",
       url: "/api/bots/b1/webhook-test",
-      returns: 204,
+      returns: { testId: "t1", path: "feed" },
     },
     {
-      name: "a test for a bot with no webhook URL, returning no status",
-      call: () => api.testWebhook("b1"),
-      answer: jsonResponse(200, { status: null }),
-      method: "POST",
-      url: "/api/bots/b1/webhook-test",
-      returns: null,
+      name: "a webhook test's progress by its encoded ID",
+      call: () => api.getWebhookTest("b1", "t/1"),
+      answer: jsonResponse(200, {
+        state: "handled",
+        path: "webhook",
+        markedStatus: "Refunded",
+      }),
+      method: "GET",
+      url: "/api/bots/b1/webhook-test/t%2F1",
+      returns: { state: "handled", path: "webhook", markedStatus: "Refunded" },
     },
   ])(
     "$name goes to $method $url",
@@ -295,8 +299,23 @@ describe("webhook test", () => {
       }),
     );
 
-    await expect(api.testWebhook("b1")).rejects.toThrow(
+    await expect(api.startWebhookTest("b1")).rejects.toThrow(
       "Your webhook answered 500. Discoin expects a 2xx answer.",
     );
+  });
+
+  test("an expired test is the API's 404", async () => {
+    stubFetch(
+      jsonResponse(404, {
+        status: 404,
+        message: "No webhook test with that ID.",
+        field: null,
+      }),
+    );
+
+    await expect(api.getWebhookTest("b1", "t1")).rejects.toMatchObject({
+      status: 404,
+      message: "No webhook test with that ID.",
+    });
   });
 });

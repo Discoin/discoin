@@ -17,8 +17,10 @@ import type {
   ReservePoint,
   ReverseRequest,
   SavedCurrency,
+  StartedWebhookTest,
   Transaction,
   TransactionDetail,
+  WebhookTestProgress,
 } from "./types.js";
 
 export const API_BASE = "/api";
@@ -225,14 +227,16 @@ export function createHttpApi(): DiscoinApi {
       }),
     removeWebhookUrl: (botId) =>
       command("DELETE", `/bots/${segment(botId)}/webhook-url`),
-    testWebhook: async (botId) => {
-      const result = await request<{ status: number | null }>(
+    startWebhookTest: (botId) =>
+      request<StartedWebhookTest>(
         "POST",
         `/bots/${segment(botId)}/webhook-test`,
-      );
-
-      return result.status;
-    },
+      ),
+    getWebhookTest: (botId, testId) =>
+      request<WebhookTestProgress>(
+        "GET",
+        `/bots/${segment(botId)}/webhook-test/${segment(testId)}`,
+      ),
     setDailyCap: (currencyId, cap) =>
       command("PUT", `/currencies/${segment(currencyId)}/daily-cap`, {
         dailyCap: cap,

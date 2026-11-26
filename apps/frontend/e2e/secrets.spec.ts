@@ -119,34 +119,51 @@ for (const theme of ["light", "dark"] as const) {
   });
 }
 
-test("Test sends a test webhook and says how the endpoint answered", async ({
+test("Test sends a test webhook, waits for the bot and says it passed", async ({
   page,
 }) => {
   await openPage(page, "/owner");
   const test = webhookPanel(page).getByRole("button", { name: "Test webhook" });
+  const status = webhookPanel(page).getByRole("status");
 
   await expect(test).toHaveText("Test webhook");
   await test.click();
 
   await expect(
-    page.getByText("Test sent. Your webhook answered 200."),
+    status.filter({
+      hasText:
+        "Your bot got the test. Waiting for it to mark the test Completed or Refunded.",
+    }),
   ).toBeVisible();
+  await expect(
+    status.filter({
+      hasText: "Test passed. Your bot marked the test Completed.",
+    }),
+  ).toBeVisible();
+  await expectWcagCompliance(page);
 });
 
-test("Test without a webhook URL adds a test event to the event feed", async ({
+test("Test without a webhook URL waits for the bot to read its event feed", async ({
   page,
 }) => {
   await openTicketBot(page);
   const test = webhookPanel(page).getByRole("button", {
     name: "Test event feed",
   });
+  const status = webhookPanel(page).getByRole("status");
 
   await expect(test).toHaveText("Test event feed");
   await test.click();
 
   await expect(
-    page.getByText(
-      "Test event added to your event feed. Your bot gets it on its next read.",
-    ),
+    status.filter({
+      hasText:
+        "Test event added to your event feed. Waiting for your bot to read it.",
+    }),
+  ).toBeVisible();
+  await expect(
+    status.filter({
+      hasText: "Test passed. Your bot marked the test Completed.",
+    }),
   ).toBeVisible();
 });

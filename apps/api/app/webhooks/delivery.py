@@ -4,9 +4,8 @@ import json
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from decimal import Decimal
 from typing import Any
-from uuid import UUID, uuid7
+from uuid import UUID
 
 import httpx
 from cryptography.exceptions import InvalidTag
@@ -46,12 +45,6 @@ class Trigger:
 
 ADMINS = Trigger("admins")
 
-TEST_EVENT = "transaction.test"
-TEST_DELIVERY_ID = 0
-NO_CURRENCY = UUID(int=0)
-TEST_AMOUNT = Decimal(100)
-TEST_PAYOUT = Decimal(10)
-
 
 @dataclass(frozen=True)
 class Outcome:
@@ -83,6 +76,7 @@ def enqueue_webhook(
 ) -> None:
     payload: dict[str, Any] = {
         "event": EVENTS[event],
+        "test": False,
         "transaction": WebhookTransaction.model_validate(transaction).model_dump(mode="json"),
     }
     if trigger is not None:
@@ -116,22 +110,6 @@ def has_webhook_url(db: Connection[DictRow], bot_id: UUID) -> bool:
     bot = db.execute("SELECT webhook_url IS NOT NULL AS has_webhook_url FROM bots WHERE id = %s", (bot_id,)).fetchone()
 
     return bot["has_webhook_url"]
-
-
-def build_test_payload(user_id: str, now: datetime) -> dict[str, Any]:
-    transaction = WebhookTransaction(
-        id=uuid7(),
-        user_id=user_id,
-        from_currency_id=NO_CURRENCY,
-        to_currency_id=NO_CURRENCY,
-        amount=TEST_AMOUNT,
-        payout=TEST_PAYOUT,
-        status="Pending",
-        submitted_at=now,
-        handled_at=None,
-    )
-
-    return {"event": TEST_EVENT, "transaction": transaction.model_dump(mode="json")}
 
 
 def drop_pending_deliveries(db: Connection[DictRow], bot_id: UUID, reason: str) -> None:

@@ -106,6 +106,25 @@ export interface BotSettings {
   webhookUrl: string | null;
 }
 
+export type WebhookTestPath = "webhook" | "feed";
+
+export interface StartedWebhookTest {
+  testId: string;
+  path: WebhookTestPath;
+}
+
+export type WebhookTestProgress =
+  | {
+      state: "waiting" | "delivered";
+      path: WebhookTestPath;
+      markedStatus: null;
+    }
+  | {
+      state: "handled";
+      path: WebhookTestPath;
+      markedStatus: "Completed" | "Refunded";
+    };
+
 export interface CurrencySettings {
   dailyCap: number | null;
 }

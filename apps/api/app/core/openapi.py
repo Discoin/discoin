@@ -15,6 +15,10 @@ DESCRIPTION = (
     "`currencyId`. "
     "A currency that doesn't exist or was removed answers 404, and one your bot doesn't run answers 403. "
     "Your bot can settle any transaction into one of its currencies. "
+    "Every webhook and event feed body carries a `test` boolean, false on real events. "
+    "The Test button on the bot owner page sends a `transaction.created` event with `test: true` and a made up "
+    "transaction, so check `test` before paying out. Mark a test with `PATCH /transactions/{id}` like a real "
+    "transaction: no coins move, and a test is unknown 10 minutes after it was sent. "
     "Errors always return `{status, message, field}`, with `field` naming the input at fault or null."
 )
 VALIDATION_SCHEMAS = ("HTTPValidationError", "ValidationError")

@@ -55,6 +55,7 @@ const COMMON_ERRORS: ErrorCase[] = [
 const WEBHOOK_EXAMPLE = json({
   id: 4182,
   event: "transaction.created",
+  test: false,
   transaction: WEBHOOK_TRANSACTION,
 });
 
@@ -499,21 +500,53 @@ function Webhooks() {
           <code>transaction.reversed</code>: a Completed transaction was
           reversed.
         </li>
-        <li>
-          <code>transaction.test</code>: sent by the Test button on the Bot
-          owner page. On a webhook, check its signature, then ignore it. In the
-          event feed, acknowledge it like any other event.
-        </li>
       </ul>
 
       <h3>Payload</h3>
       <p>
         The body is JSON with <code>id</code>, <code>event</code>,{" "}
-        <code>transaction</code> and, on events caused by a block,{" "}
-        <code>triggeredBy</code>. Retries carry the same <code>id</code>, so you
-        can skip one you already handled.
+        <code>test</code>, <code>transaction</code> and, on events caused by a
+        block, <code>triggeredBy</code>. Retries carry the same <code>id</code>,
+        so you can skip one you already handled. <code>test</code> is{" "}
+        <code>false</code> on every real event.
       </p>
       <CodeSample title="Body" code={WEBHOOK_EXAMPLE} label="Webhook payload" />
+
+      <h3>Test events</h3>
+      <p>
+        The Test button on the Bot owner page sends your bot a{" "}
+        <code>transaction.created</code> event with <code>test</code> set to{" "}
+        <code>true</code>, on the webhook if your bot has a URL and in the event
+        feed if it has none. Check <code>test</code> before you pay out: a test
+        moves no coins on Discoin, so a bot that pays one gives its own coins
+        away.
+      </p>
+      <ul>
+        <li>
+          The transaction is made up. It has a new <code>id</code> for each
+          test, the owner's Discord ID as <code>userId</code>, amount 100,
+          payout 10, and <code>00000000-0000-0000-0000-000000000000</code> as
+          both <code>fromCurrencyId</code> and <code>toCurrencyId</code>. On a
+          webhook it is signed like a real event and its delivery{" "}
+          <code>id</code> is 0.
+        </li>
+        <li>
+          Skip the payout, then settle the test with{" "}
+          <code>PATCH /transactions/{"{id}"}</code> like a real transaction. The
+          test passes once your bot marks it Completed or Refunded. The answer
+          has that status, and <code>TEST</code> as both currencies.
+        </li>
+        <li>
+          The owner sees a failure at once when your webhook doesn't answer 2xx,
+          and after 60 seconds when your bot doesn't read its event feed or
+          doesn't mark the test.
+        </li>
+        <li>
+          A test is never listed in <code>GET /transactions/pending</code> or{" "}
+          <code>GET /transactions/undone</code>. It is forgotten after 10
+          minutes, and a later <code>PATCH</code> answers <code>404</code>.
+        </li>
+      </ul>
 
       <h3>Signature</h3>
       <p>
