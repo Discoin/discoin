@@ -283,6 +283,69 @@ def test_removed_currency_must_be_inactive(at_multiplier_release: psycopg.Connec
         at_multiplier_release.execute("UPDATE currencies SET removed_at = now() WHERE id = %s", (OATS,))
 
 
+def test_event_feed_migration_gives_existing_and_new_bots_an_empty_feed(
+    connection: psycopg.Connection, tmp_path: Path
+) -> None:
+    insert_bot = "INSERT INTO bots (id, name, discord_id, owner_id) VALUES (%s, 'Oat bot', %s, %s)"
+    existing = "019a8000-0000-7000-8000-000000000031"
+    added_later = "019a8000-0000-7000-8000-000000000032"
+
+    for migration in sorted(MIGRATIONS_DIRECTORY.glob("000[1-4]_*.sql")):
+        shutil.copy(migration, tmp_path / migration.name)
+
+    apply_migrations(connection, tmp_path)
+    connection.execute(insert_bot, (existing, "400000000000000004", BLOCKED_USER))
+
+    apply_migrations(connection, MIGRATIONS_DIRECTORY)
+    connection.execute(insert_bot, (added_later, "400000000000000005", BLOCKED_USER))
+
+    feeds = connection.execute("SELECT bot_id, last_event_id, acknowledged_event_id FROM bot_feeds ORDER BY bot_id")
+    assert feeds.fetchall() == [
+        {"bot_id": UUID(existing), "last_event_id": 0, "acknowledged_event_id": 0},
+        {"bot_id": UUID(added_later), "last_event_id": 0, "acknowledged_event_id": 0},
+    ]
+
+
+def test_undone_handled_migration_adds_two_nullable_columns_and_leaves_rows_untouched(
+    connection: psycopg.Connection, tmp_path: Path
+) -> None:
+    added = {"receiver_handled_at", "sender_handled_at"}
+
+    for migration in sorted(MIGRATIONS_DIRECTORY.glob("000[1-5]_*.sql")):
+        shutil.copy(migration, tmp_path / migration.name)
+
+    apply_migrations(connection, tmp_path)
+    connection.execute(
+        """
+        INSERT INTO currencies (id, name, abbreviation, reserve, weekly_median, multiplier)
+        VALUES (%s, 'Oats', 'OAT', 100000, 25000, 4), (%s, 'Gems', 'GEM', 100000, 25000, 4)
+        """,
+        (OATS, GEMS),
+    )
+    connection.execute(
+        """
+        INSERT INTO transactions
+            (id, user_id, from_currency_id, to_currency_id, amount, payout, status, submitted_at, handled_at)
+        VALUES (%s, %s, %s, %s, 100, 10, 'Reversed', now(), now())
+        """,
+        (PENDING_ID, BLOCKED_USER, GEMS, OATS),
+    )
+    before = connection.execute("SELECT * FROM transactions").fetchone()
+
+    apply_migrations(connection, MIGRATIONS_DIRECTORY)
+
+    after = connection.execute("SELECT * FROM transactions").fetchone()
+    nullable = connection.execute(
+        """
+        SELECT column_name FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'transactions' AND is_nullable = 'YES'
+        """
+    ).fetchall()
+    assert after == {**before, "receiver_handled_at": None, "sender_handled_at": None}
+    assert added <= {row["column_name"] for row in nullable}
+    assert added & set(before) == set()
+
+
 def test_needs_autocommit_connection(database_url: str, tmp_path: Path) -> None:
     with psycopg.connect(database_url) as connection, pytest.raises(MigrationError, match="autocommit"):
         apply_migrations(connection, tmp_path)

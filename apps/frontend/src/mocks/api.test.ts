@@ -277,6 +277,19 @@ describe("public reads", () => {
     expect(error.status).toBe(404);
   });
 
+  test("an inactive currency is a 404 by abbreviation, history and trades", async () => {
+    const api = createMockApi();
+    await settle(api.updateCurrency(OATS.id, { active: false }));
+
+    const lookup = await apiErrorOf(api.getCurrency("OAT"));
+    const history = await apiErrorOf(api.getReserveHistory(OATS.id, 7));
+    const trades = await apiErrorOf(api.listCurrencyTransactions(OATS.id));
+
+    expect([lookup.status, history.status, trades.status]).toEqual([
+      404, 404, 404,
+    ]);
+  });
+
   test("a currency's trades all go into or out of it", async () => {
     const api = createMockApi();
     const trades = await settle(api.listCurrencyTransactions(OATS.id));

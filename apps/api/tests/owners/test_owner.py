@@ -227,7 +227,8 @@ def test_regenerated_token_works_once_and_is_hidden_after(client: TestClient, ow
         "/transactions/pending", params={"currencyId": str(owned)}, headers={"Authorization": f"Bearer {token}"}
     )
 
-    assert token.startswith("dsc_live_")
+    assert token.startswith("dsc_")
+    assert not token.startswith("dsc_live_")
     assert pending.status_code == 200
     assert client.get(f"/bots/{owned_bot}/settings").json()["hasApiToken"] is True
     assert token not in client.get(f"/bots/{owned_bot}/settings").text

@@ -32,7 +32,7 @@ def checked_positive_cents(amount: Decimal, field: str, label: str) -> Decimal:
 def checked_discord_id(value: str, field: str) -> str:
     trimmed = value.strip()
     if not DISCORD_ID_PATTERN.match(trimmed):
-        raise ApiError(400, "Enter a Discord user ID: 17 to 20 digits, like 412358906715234305.", field)
+        raise ApiError(400, "Enter a Discord user ID, like 412358906715234305.", field)
 
     return trimmed
 

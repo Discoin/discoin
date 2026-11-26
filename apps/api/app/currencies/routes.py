@@ -9,7 +9,6 @@ from app.currencies.models import Currency, Quote, ReservePoint
 from app.currencies.queries import (
     find_currency_by_abbreviation,
     list_active_currencies,
-    list_all_currencies,
     reserve_history,
 )
 from app.transactions.exchange import checked_payout, load_exchange_side
@@ -18,14 +17,7 @@ router = APIRouter(tags=["currencies"])
 
 
 @router.get("/currencies")
-def get_currencies(
-    db: Database,
-    now: Now,
-    include_inactive: Annotated[bool, Query(alias="includeInactive")] = False,
-) -> list[Currency]:
-    if include_inactive:
-        return list_all_currencies(db, now)
-
+def get_currencies(db: Database, now: Now) -> list[Currency]:
     return list_active_currencies(db, now)
 
 

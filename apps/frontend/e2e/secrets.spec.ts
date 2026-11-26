@@ -133,10 +133,20 @@ test("Test sends a test webhook and says how the endpoint answered", async ({
   ).toBeVisible();
 });
 
-test("Test only shows once a webhook URL is saved", async ({ page }) => {
+test("Test without a webhook URL adds a test event to the event feed", async ({
+  page,
+}) => {
   await openTicketBot(page);
+  const test = webhookPanel(page).getByRole("button", {
+    name: "Test event feed",
+  });
+
+  await expect(test).toHaveText("Test event feed");
+  await test.click();
 
   await expect(
-    webhookPanel(page).getByRole("button", { name: "Test webhook" }),
-  ).toHaveCount(0);
+    page.getByText(
+      "Test event added to your event feed. Your bot gets it on its next read.",
+    ),
+  ).toBeVisible();
 });

@@ -4,6 +4,10 @@
 
 .site-header {
   background-color: var(--surface-raised);
+
+  &:not(:has(.ticker, .site-header__ticker-note)) {
+    border-bottom: 1px solid var(--line);
+  }
 }
 
 .site-header__bar {

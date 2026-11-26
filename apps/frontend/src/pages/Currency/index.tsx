@@ -130,7 +130,6 @@ function CurrencyView({
         <h1 class="quote__name">
           {currency.name}{" "}
           <span class="currency-tag__code figure">{abbreviation}</span>
-          {!currency.active && <span class="quote__inactive">Inactive</span>}
         </h1>
         <p class="quote__price">
           <span class="quote__value figure">
@@ -177,19 +176,10 @@ function CurrencyView({
       </Panel>
       <Panel id="trade" title={`Trade ${abbreviation}`}>
         <div class="quote__calculator">
-          {currency.active ? (
-            <TradeableCalculator
-              currencies={currencies}
-              initialFromId={currency.id}
-            />
-          ) : (
-            <EmptyState title="Trading is paused">
-              <p>
-                {abbreviation} is inactive, so it can't be converted right now.
-                Its history stays here.
-              </p>
-            </EmptyState>
-          )}
+          <TradeableCalculator
+            currencies={currencies}
+            initialFromId={currency.id}
+          />
         </div>
       </Panel>
       <Panel id="trades" title={`Recent ${abbreviation} trades`}>

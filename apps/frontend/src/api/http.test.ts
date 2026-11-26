@@ -82,10 +82,10 @@ describe("requests", () => {
     {
       name: "a regenerated token as plain text",
       call: () => api.regenerateApiToken("b1"),
-      answer: jsonResponse(200, { token: "dsc_live_abc" }),
+      answer: jsonResponse(200, { token: "dsc_abc" }),
       method: "POST",
       url: "/api/bots/b1/api-token",
-      returns: "dsc_live_abc",
+      returns: "dsc_abc",
     },
     {
       name: "a webhook secret for the bot",
@@ -134,6 +134,14 @@ describe("requests", () => {
       method: "POST",
       url: "/api/bots/b1/webhook-test",
       returns: 204,
+    },
+    {
+      name: "a test for a bot with no webhook URL, returning no status",
+      call: () => api.testWebhook("b1"),
+      answer: jsonResponse(200, { status: null }),
+      method: "POST",
+      url: "/api/bots/b1/webhook-test",
+      returns: null,
     },
   ])(
     "$name goes to $method $url",

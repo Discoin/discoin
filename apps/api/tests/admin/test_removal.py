@@ -425,10 +425,8 @@ def test_leak_1_to_3_removed_currency_is_gone_from_lists_lookups_history_and_tra
     market.remove_currency(market.oats)
 
     active = [row["abbreviation"] for row in market.client.get("/currencies").json()]
-    every = [row["abbreviation"] for row in market.client.get("/currencies", params={"includeInactive": True}).json()]
     admin = [row["currency"]["abbreviation"] for row in market.client.get("/admin/currencies").json()]
     assert active == ["GEM", "PBL"]
-    assert every == ["GEM", "PBL"]
     assert admin == ["GEM", "PBL"]
     assert market.client.get("/currencies/OAT").status_code == 404
     assert market.client.get(f"/currencies/{market.oats}/history", params={"days": 7}).status_code == 404

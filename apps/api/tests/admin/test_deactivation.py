@@ -79,8 +79,8 @@ def test_inactive_currency_is_hidden_and_rejects_new_transactions(
     quote = client.get("/quote", params={"fromCurrencyId": str(gems), "toCurrencyId": str(oats), "amount": "10"})
 
     assert listed == ["GEM", "PBL"]
-    assert client.get("/currencies/OAT").json()["active"] is False
-    assert client.get(f"/currencies/{oats}/history", params={"days": 7}).status_code == 200
+    assert client.get("/currencies/OAT").status_code == 404
+    assert client.get(f"/currencies/{oats}/history", params={"days": 7}).status_code == 404
     assert (quote.status_code, quote.json()["field"]) == (400, "toCurrencyId")
 
 

@@ -241,14 +241,10 @@ function AdminWorkspace() {
       >
         {(data) => (
           <>
-            <CurrencyEditor data={data} onChange={refresh} />
-            <Panel
-              id="bots"
-              title="Bots"
-              description="Each currency belongs to one bot, and the bot's owner manages it on the Bot owner page."
-            >
+            <Panel id="bots" title="Bots">
               <Bots bots={data.bots} onChange={refresh} />
             </Panel>
+            <CurrencyEditor data={data} onChange={refresh} />
           </>
         )}
       </Loadable>
