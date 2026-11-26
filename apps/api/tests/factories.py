@@ -115,6 +115,18 @@ def create_transaction(
     return transaction_id
 
 
+def feed_events(db: Connection, bot_id: UUID) -> list[tuple[int, str]]:
+    rows = db.execute("SELECT id, event FROM bot_events WHERE bot_id = %s ORDER BY id", (bot_id,)).fetchall()
+
+    return [(row["id"], row["event"]) for row in rows]
+
+
+def feed_position(db: Connection, bot_id: UUID) -> dict[str, int]:
+    return db.execute(
+        "SELECT last_event_id, acknowledged_event_id FROM bot_feeds WHERE bot_id = %s", (bot_id,)
+    ).fetchone()
+
+
 def log_in(client: TestClient, db: Connection, user_id: str) -> None:
     db.execute(
         "INSERT INTO users (id, username) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING",

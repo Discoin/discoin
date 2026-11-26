@@ -63,7 +63,7 @@ test("clicking Resources toggles the list of resource links it controls", () => 
 
   expect(resourcesButton().getAttribute("aria-expanded")).toBe("true");
   expect(resourcesButton().getAttribute("aria-controls")).toBe(list?.id);
-  expect(docs.getAttribute("href")).toBe("/api/docs");
+  expect(docs.getAttribute("href")).toBe("/docs");
   expect(docs.hasAttribute("target")).toBe(false);
 
   fireEvent.click(resourcesButton());

@@ -5,6 +5,7 @@ from uuid import UUID
 from psycopg import Connection, sql
 from psycopg.rows import DictRow
 
+from app.bots.feed import lock_feeds_receiving
 from app.transactions.ledger import undo_transaction
 from app.transactions.locking import LockPlan, lock_currencies_first
 from app.webhooks.delivery import enqueue_webhook
@@ -21,7 +22,10 @@ def reactivate_currency(db: Connection[DictRow], currency_id: UUID) -> None:
 
 def cancel_pending(db: Connection[DictRow], currency_ids: frozenset[UUID], now: datetime) -> None:
     plan = LockPlan(currency_ids, lambda lock: find_pending(db, currency_ids, lock))
-    for transaction in lock_currencies_first(db, plan):
+    pending = lock_currencies_first(db, plan)
+    lock_feeds_receiving(db, [transaction["to_currency_id"] for transaction in pending])
+
+    for transaction in pending:
         cancelled = undo_transaction(db, transaction, "Cancelled", now)
         enqueue_webhook(db, cancelled, "cancelled", now)
 

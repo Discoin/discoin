@@ -77,7 +77,7 @@ test("flipping Active back leaves nothing to review", async ({ page }) => {
   ).toBeDisabled();
 });
 
-test("an inactive currency leaves the table and ticker but keeps its page", async ({
+test("an inactive currency leaves the table and ticker and its page is missing", async ({
   page,
 }) => {
   await deactivateOats(page);
@@ -90,8 +90,7 @@ test("an inactive currency leaves the table and ticker but keeps its page", asyn
   ).toBeVisible();
 
   await goTo(page, "/currency/OAT");
-  await expect(page.getByText("Inactive", { exact: true })).toBeVisible();
-  await expect(page.getByText("Trading is paused")).toBeVisible();
+  await expect(page.getByText("No currency called OAT")).toBeVisible();
 });
 
 test("reactivating brings the currency back", async ({ page }) => {
@@ -151,7 +150,7 @@ for (const theme of ["light", "dark"] as const) {
     await expectWcagCompliance(page);
   });
 
-  test(`an inactive currency page meets WCAG 2.2 AA in the ${theme} theme`, async ({
+  test(`the missing page of an inactive currency meets WCAG 2.2 AA in the ${theme} theme`, async ({
     page,
   }) => {
     await page.emulateMedia({ colorScheme: theme });

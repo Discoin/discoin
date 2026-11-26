@@ -3,10 +3,9 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   accountButton,
   boxOf,
-  expectLeftForApiDocs,
+  expectOnDocsPage,
   menuButton,
   openPage,
-  stubApiDocs,
 } from "./support.js";
 
 function resourcesButton(page: Page) {
@@ -14,7 +13,7 @@ function resourcesButton(page: Page) {
 }
 
 function apiDocsLink(page: Page) {
-  return page.getByRole("link", { name: "API Docs" });
+  return page.getByRole("link", { name: "API Docs", exact: true });
 }
 
 test("Resources sits right of the Main nav, before the theme toggle and the account", async ({
@@ -42,7 +41,7 @@ test("Resources is collapsed until clicked, then lists API Docs", async ({
 
   await resourcesButton(page).click();
   await expect(resourcesButton(page)).toHaveAttribute("aria-expanded", "true");
-  await expect(apiDocsLink(page)).toHaveAttribute("href", "/api/docs");
+  await expect(apiDocsLink(page)).toHaveAttribute("href", "/docs");
   await expect(apiDocsLink(page)).not.toHaveAttribute("target");
 
   await resourcesButton(page).click();
@@ -63,13 +62,14 @@ test("the keyboard opens Resources with Enter and with Space", async ({
   }
 });
 
-test("API Docs leaves the app for the API's Swagger page in the same tab", async ({
+test("API Docs opens the docs page in the app and closes Resources", async ({
   page,
 }) => {
-  const documentRequests = await stubApiDocs(page);
   await openPage(page, "/");
   await resourcesButton(page).click();
   await apiDocsLink(page).click();
 
-  await expectLeftForApiDocs(page, documentRequests);
+  await expectOnDocsPage(page);
+  await expect(resourcesButton(page)).toHaveAttribute("aria-expanded", "false");
+  await expect(apiDocsLink(page)).toHaveCount(0);
 });

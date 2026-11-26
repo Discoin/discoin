@@ -39,6 +39,7 @@ const PAGES = [
   { path: "/admin", title: "Admin | Discoin" },
   { path: "/currency/OAT", title: "Oats (OAT) | Discoin" },
   { path: "/privacy", title: "Privacy and cookies | Discoin" },
+  { path: "/docs", title: "API docs | Discoin" },
   { path: "/no-such-page", title: "Page not found | Discoin" },
 ];
 const THEMES = ["light", "dark"] as const;
@@ -58,6 +59,18 @@ for (const { path } of PAGES) {
       await expectWcagCompliance(page);
     });
   }
+}
+
+for (const theme of THEMES) {
+  test(`/docs with the Python sample meets WCAG 2.2 AA in the ${theme} theme`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: theme });
+    await openPage(page, "/docs");
+    await page.getByRole("radio", { name: "Python" }).check();
+
+    await expectWcagCompliance(page);
+  });
 }
 
 for (const theme of THEMES) {
@@ -336,7 +349,9 @@ for (const theme of THEMES) {
     await page.emulateMedia({ colorScheme: theme });
     await openPage(page, "/");
     await page.getByRole("button", { name: "Resources" }).click();
-    await expect(page.getByRole("link", { name: "API Docs" })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "API Docs", exact: true }),
+    ).toBeVisible();
 
     await expectWcagCompliance(page);
   });

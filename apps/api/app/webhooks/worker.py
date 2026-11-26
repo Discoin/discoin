@@ -7,6 +7,7 @@ import httpx
 import psycopg
 from psycopg.rows import dict_row
 
+from app.bots.feed import purge_expired_events
 from app.core.config import require_environment_variable
 from app.core.logs import configure_logging
 from app.core.secret_box import SecretBox
@@ -32,6 +33,7 @@ def run(database_url: str, box: SecretBox, stop: threading.Event) -> None:
             if attempted:
                 logger.info("webhooks attempted", extra={"attempted": attempted})
 
+            purge_expired_events(db, datetime.now(UTC))
             stop.wait(POLL_SECONDS)
 
 

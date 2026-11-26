@@ -11,6 +11,8 @@ import { Ticker } from "./Ticker.jsx";
 import { Wordmark } from "./Wordmark.jsx";
 import "./Header.scss";
 
+const DOCS_PATH = "/docs";
+
 function ReadyTicker({ currencies }: { currencies: Currency[] }) {
   if (currencies.length === 0) return null;
 
@@ -39,6 +41,10 @@ function PriceTicker() {
   );
 }
 
+function showsPrices(path: string): boolean {
+  return !path.startsWith(DOCS_PATH);
+}
+
 export function Header() {
   const { path } = useLocation();
 
@@ -54,7 +60,7 @@ export function Header() {
         <AccountMenu />
         <NavDrawer />
       </div>
-      <PriceTicker />
+      {showsPrices(path) && <PriceTicker />}
     </header>
   );
 }

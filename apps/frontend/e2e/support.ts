@@ -181,33 +181,12 @@ export async function boxOf(locator: Locator) {
   return box;
 }
 
-const API_DOCS_TITLE = "Discoin API - Swagger UI";
-
-export async function stubApiDocs(page: Page): Promise<string[]> {
-  const documentRequests: string[] = [];
-  await page.route("**/api/docs", (route) => {
-    if (route.request().isNavigationRequest()) {
-      documentRequests.push(route.request().url());
-    }
-
-    return route.fulfill({
-      contentType: "text/html",
-      body: `<title>${API_DOCS_TITLE}</title><div id="swagger-ui"></div>`,
-    });
-  });
-
-  return documentRequests;
-}
-
-export async function expectLeftForApiDocs(
-  page: Page,
-  documentRequests: string[],
-): Promise<void> {
-  await expect(page).toHaveTitle(API_DOCS_TITLE);
-  expect(new URL(page.url()).pathname).toBe("/api/docs");
-  await expect(page.locator(".site-header")).toHaveCount(0);
-  expect(documentRequests).toHaveLength(1);
-  expect(page.context().pages()).toHaveLength(1);
+export async function expectOnDocsPage(page: Page): Promise<void> {
+  await expect(page).toHaveURL(/\/docs$/);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "API docs" }),
+  ).toBeVisible();
+  await expect(page).toHaveTitle("API docs | Discoin");
 }
 
 export function menuButton(page: Page): Locator {
