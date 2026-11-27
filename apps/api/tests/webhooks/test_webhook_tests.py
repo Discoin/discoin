@@ -14,7 +14,7 @@ from app.webhooks.delivery import WebhookSender
 from app.webhooks.webhook_tests import TEST_LIFETIME
 from tests.bots.test_bot import bot_headers
 from tests.factories import NOW, OWNER_ID, UNKNOWN_ID, bot_of, log_in, reserve_of
-from tests.webhooks.receiver import BOX, Receiver, connect_webhook
+from tests.webhooks.receiver import BOX, HOOK_URL, Receiver, connect_webhook
 
 NIL_UUID = "00000000-0000-0000-0000-000000000000"
 NOW_TEXT = "2026-11-13T12:00:00Z"
@@ -60,8 +60,13 @@ class BotUnderTest:
             f"/transactions/{test_id}", headers=self.token if headers is None else headers, json={"status": status}
         )
 
-    def acknowledge(self, event_id: int) -> Response:
-        return self.client.post("/events/ack", headers=self.token, json={"id": event_id})
+    def claim(self) -> Response:
+        return self.client.post("/events/claim", headers=self.token)
+
+    def save_webhook_url(self) -> Response:
+        self.client.post(f"/bots/{self.bot_id}/webhook-secret")
+
+        return self.client.put(f"/bots/{self.bot_id}/webhook-url", json={"webhookUrl": HOOK_URL})
 
     def submit_at(self, test_id: str, submitted_at: datetime) -> None:
         self.connection.execute("UPDATE webhook_tests SET submitted_at = %s WHERE id = %s", (submitted_at, test_id))
@@ -77,16 +82,25 @@ def tested(client: TestClient, connection: psycopg.Connection, pair: tuple[UUID,
     return BotUnderTest(client, connection, pair)
 
 
-def test_a_feed_test_waits_until_the_bot_acknowledges_its_event(tested: BotUnderTest) -> None:
+def test_a_feed_test_waits_until_the_bot_claims_its_event(tested: BotUnderTest) -> None:
     test_id = tested.start()
 
-    before_the_read = tested.progress(test_id)
-    tested.acknowledge(1)
+    before_the_claim = tested.progress(test_id)
+    tested.claim()
 
-    assert (before_the_read.status_code, before_the_read.json()) == (
+    assert (before_the_claim.status_code, before_the_claim.json()) == (
         200,
         {"state": "waiting", "path": "feed", "markedStatus": None},
     )
+    assert tested.progress(test_id).json() == {"state": "delivered", "path": "feed", "markedStatus": None}
+
+
+def test_a_feed_test_whose_event_was_cleared_by_a_url_save_is_delivered(tested: BotUnderTest) -> None:
+    test_id = tested.start()
+
+    saved = tested.save_webhook_url()
+
+    assert saved.status_code == 204
     assert tested.progress(test_id).json() == {"state": "delivered", "path": "feed", "markedStatus": None}
 
 
@@ -105,7 +119,7 @@ def test_a_marked_test_is_handled_with_the_status_the_bot_chose(tested: BotUnder
     assert tested.progress(test_id).json() == {"state": "handled", "path": "webhook", "markedStatus": status}
 
 
-def test_a_feed_test_marked_without_an_acknowledgement_is_handled(tested: BotUnderTest) -> None:
+def test_a_feed_test_marked_without_a_claim_is_handled(tested: BotUnderTest) -> None:
     test_id = tested.start()
 
     tested.mark(test_id)

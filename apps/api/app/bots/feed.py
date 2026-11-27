@@ -32,15 +32,17 @@ def add_event(db: Connection[DictRow], bot_id: UUID, payload: dict[str, Any], no
         "UPDATE bot_feeds SET last_event_id = last_event_id + 1 WHERE bot_id = %s RETURNING last_event_id", (bot_id,)
     ).fetchone()
     db.execute(
-        "INSERT INTO bot_events (bot_id, id, event, payload, created_at) VALUES (%s, %s, %s, %s, %s)",
-        (bot_id, numbered["last_event_id"], payload["event"], Jsonb(payload), now),
+        """
+        INSERT INTO bot_events (bot_id, id, event, payload, created_at, next_attempt_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (bot_id, numbered["last_event_id"], payload["event"], Jsonb(payload), now, now),
     )
 
     return numbered["last_event_id"]
 
 
 def clear_feed(db: Connection[DictRow], bot_id: UUID) -> None:
-    db.execute("UPDATE bot_feeds SET acknowledged_event_id = last_event_id WHERE bot_id = %s", (bot_id,))
     db.execute("DELETE FROM bot_events WHERE bot_id = %s", (bot_id,))
 
 

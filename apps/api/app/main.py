@@ -34,7 +34,7 @@ from app.webhooks.delivery import WebhookSender
 from app.webhooks.public_transport import PublicAddressTransport
 
 OUTBOUND_TIMEOUT_SECONDS = 10
-CREDENTIAL_REQUESTS_PER_MINUTE = 300
+SESSION_REQUESTS_PER_MINUTE = 300
 ADDRESS_REQUESTS_PER_MINUTE = 1200
 RATE_WINDOW_SECONDS = 60
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -88,7 +88,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Discoin API", version="1.0.0", lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.settings = settings
     app.state.secret_box = SecretBox.from_base64(settings.webhook_secret_key)
-    app.state.credential_limiter = RateLimiter(CREDENTIAL_REQUESTS_PER_MINUTE, RATE_WINDOW_SECONDS)
+    app.state.session_limiter = RateLimiter(SESSION_REQUESTS_PER_MINUTE, RATE_WINDOW_SECONDS)
     app.state.address_limiter = RateLimiter(ADDRESS_REQUESTS_PER_MINUTE, RATE_WINDOW_SECONDS)
     install_error_handlers(app)
     install_routes(app)
@@ -189,6 +189,6 @@ def within_rate_limits(request: Request) -> bool:
     if not request.app.state.address_limiter.admit(request.client.host):
         return False
 
-    credential = request.headers.get("authorization") or request.cookies.get(SESSION_COOKIE)
+    session = request.cookies.get(SESSION_COOKIE)
 
-    return credential is None or request.app.state.credential_limiter.admit(hash_secret(credential))
+    return session is None or request.app.state.session_limiter.admit(hash_secret(session))

@@ -35,7 +35,7 @@ from tests.factories import (
     create_botless_currency,
     create_currency,
     feed_events,
-    feed_position,
+    last_event_id,
 )
 from tests.webhooks.receiver import BOX, HOOK_URL, TEST_SECRET, Receiver, connect_webhook
 
@@ -316,7 +316,7 @@ def test_an_event_written_before_a_url_save_is_cleared_by_the_save(
 
     assert feed_events(connection, owned.bot_id) == []
     assert delivered_events(connection) == []
-    assert feed_position(connection, owned.bot_id) == {"last_event_id": 1, "acknowledged_event_id": 1}
+    assert last_event_id(connection, owned.bot_id) == 1
 
 
 def test_an_event_written_during_a_url_save_goes_to_the_webhook(
@@ -331,7 +331,7 @@ def test_an_event_written_during_a_url_save_goes_to_the_webhook(
 
     assert feed_events(connection, owned.bot_id) == []
     assert delivered_events(connection) == ["created"]
-    assert feed_position(connection, owned.bot_id) == {"last_event_id": 0, "acknowledged_event_id": 0}
+    assert last_event_id(connection, owned.bot_id) == 0
 
 
 def test_an_event_written_before_a_url_removal_stays_with_the_webhook(
@@ -391,9 +391,8 @@ def test_an_event_committed_while_its_bot_is_revoked_is_deleted_with_the_feed(
 
     run_second_while_first_is_uncommitted(database_url, connection, trade(gems, oats), lambda db: revoke(db, oat_bot))
 
-    position = feed_position(connection, oat_bot)
     assert feed_events(connection, oat_bot) == []
-    assert position["acknowledged_event_id"] == position["last_event_id"] >= 1
+    assert last_event_id(connection, oat_bot) >= 1
 
 
 def test_a_purge_skips_a_feed_that_is_being_written_instead_of_waiting(

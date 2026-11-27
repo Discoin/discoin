@@ -219,10 +219,10 @@ function RateLimits() {
   return (
     <DocSection heading={RATE_LIMITS}>
       <p>
-        Each IP address can make 1200 requests a minute, and each token 300 a
-        minute. Over either limit, the API answers <code>429</code> with a{" "}
-        <code>Retry-After: 60</code> header. Wait that many seconds before
-        trying again.
+        Each IP address can make 1200 requests a minute. Bot tokens have no
+        limit of their own. Over the limit, the API answers <code>429</code>{" "}
+        with a <code>Retry-After: 60</code> header. Wait that many seconds
+        before trying again.
       </p>
     </DocSection>
   );
@@ -388,9 +388,9 @@ function UndoneTransactions() {
       <p>
         Mark every transaction you receive, even one your bot can only log. The
         list has no cursor: a transaction you never mark comes back first on
-        every call. A delivered webhook or an acknowledged feed event does not
-        mark anything, so a reversal your bot already handled from an event
-        still shows up here. Skip the coins, then mark it.
+        every call. A delivered webhook or a handled feed event does not mark
+        anything, so a reversal your bot already handled from an event still
+        shows up here. Skip the coins, then mark it.
       </p>
       <p>
         Transactions of an inactive or removed currency stay on the list, with{" "}
@@ -407,9 +407,9 @@ function EventFeed() {
     <DocSection heading={EVENT_FEED}>
       <p>
         The event feed is for bots with no public address. Your bot asks{" "}
-        <code>GET /events</code> for what happened to transactions into its
-        currencies, with its normal API token. It needs no URL, no secret and no
-        signature check.
+        <code>POST /events/claim</code> for what happened to transactions into
+        its currencies, with its normal API token, then tells Discoin whether it
+        handled each event. It needs no URL, no secret and no signature check.
       </p>
       <p>
         A bot uses a webhook or the event feed, not both. While your bot has a
@@ -425,33 +425,53 @@ function EventFeed() {
           <code>GET /transactions/undone</code> and handle what is there.
         </li>
         <li>
-          Call <code>GET /events</code> about every 2 seconds and handle the
-          events in <code>id</code> order. They are the same events, with the
-          same body, as the ones listed under Webhooks.
+          Call <code>POST /events/claim</code> about every 2 seconds. It returns
+          the same events, with the same body, as the ones listed under
+          Webhooks, plus <code>attempt</code>, the number of this try.
         </li>
         <li>
-          After handling them, send the highest <code>id</code> to{" "}
-          <code>POST /events/ack</code>. Discoin keeps that cursor, so your bot
-          picks up where it stopped after a restart.
+          For each event, send <code>POST /events/{"{id}"}/result</code> with{" "}
+          <code>{'{"handled": true}'}</code> once your bot handled it, or{" "}
+          <code>{'{"handled": false}'}</code> when it could not.
         </li>
         <li>A full batch means more are waiting, so call again at once.</li>
       </ol>
 
+      <h3>Leases and retries</h3>
+      <p>
+        A claim leases its events to your bot for 2 minutes, so the next claim
+        does not return them again. A handled event is finished for good. An
+        unhandled event comes back after a backoff: 1 minute after the first
+        try, then 2, 4, 8, 16, 32 and 64 minutes. An event your bot never
+        reports on comes back once the lease and the backoff have both passed,
+        and that counts as a failed try.
+      </p>
+      <p>
+        An event gets 8 tries. After that it is dead and Discoin does not return
+        it again, so find the transaction with{" "}
+        <code>GET /transactions/pending</code> or{" "}
+        <code>GET /transactions/undone</code>. A failed event never holds back
+        the ones after it, so events can arrive out of <code>id</code> order.
+      </p>
+
       <h3>Duplicates</h3>
       <p>
         Your bot can get an event twice: when it stops between handling an event
-        and acknowledging it, and when the owner resends a transaction from the
-        Bot owner page. Skip an event when you already handled that transaction{" "}
-        <code>id</code> with that <code>event</code>.
+        and reporting it, when it takes longer than the lease, and when the
+        owner resends a transaction from the Bot owner page. Make your handler
+        idempotent by transaction ID: skip an event when you already handled
+        that transaction <code>id</code> with that <code>event</code>. When{" "}
+        <code>attempt</code> is above 1, also check that the transaction is
+        still Pending before paying out.
       </p>
 
       <h3>Expiry</h3>
       <p>
-        Discoin keeps an event for 24 hours, then deletes it whether your bot
-        read it or not. There is no error for that: <code>GET /events</code>{" "}
-        returns what is still stored. If your bot was offline for more than 24
-        hours, the older events are gone without notice, so read{" "}
-        <code>GET /transactions/pending</code> and{" "}
+        Discoin keeps an event for 24 hours, then deletes it in every state,
+        handled or not. There is no error for that:{" "}
+        <code>POST /events/claim</code> returns what is still stored and due. If
+        your bot was offline for more than 24 hours, the older events are gone
+        without notice, so read <code>GET /transactions/pending</code> and{" "}
         <code>GET /transactions/undone</code> when it starts to catch up.
       </p>
 
@@ -459,7 +479,7 @@ function EventFeed() {
       <ul>
         <li>
           Saving a webhook URL switches the feed off and deletes the events your
-          bot had not read. They are not sent to the webhook, so read{" "}
+          bot had not handled. They are not sent to the webhook, so read{" "}
           <code>GET /transactions/pending</code> and{" "}
           <code>GET /transactions/undone</code> to catch up.
         </li>

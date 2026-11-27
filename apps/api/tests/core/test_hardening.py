@@ -8,6 +8,7 @@ import pytest
 from cryptography.exceptions import InvalidTag
 from fastapi.testclient import TestClient
 
+from app.bots.tokens import issue_api_token
 from app.core.logs import JsonFormatter
 from app.core.rate_limit import RateLimiter
 from app.core.secret_box import InvalidKeyError, SecretBox
@@ -21,6 +22,7 @@ from tests.factories import (
     USER_ID,
     WEBHOOK_SECRET_KEY,
     bot_of,
+    create_bot,
     create_currency,
     create_transaction,
     log_in,
@@ -168,11 +170,22 @@ def test_made_up_credentials_do_not_escape_the_address_limit(client: TestClient)
     assert statuses == [200, 200, 200, 429]
 
 
-def test_valid_credential_has_its_own_limit(client: TestClient, connection: psycopg.Connection) -> None:
-    client.app.state.credential_limiter = RateLimiter(limit=1, window_seconds=60)
+def test_session_has_its_own_limit(client: TestClient, connection: psycopg.Connection) -> None:
+    client.app.state.session_limiter = RateLimiter(limit=1, window_seconds=60)
     log_in(client, connection, USER_ID)
 
     assert [client.get("/me").status_code for _ in range(2)] == [200, 429]
+
+
+def test_bot_token_has_no_limit_of_its_own(client: TestClient, connection: psycopg.Connection) -> None:
+    client.app.state.session_limiter = RateLimiter(limit=1, window_seconds=60)
+    token = issue_api_token(connection, create_bot(connection))
+
+    statuses = [
+        client.post("/events/claim", headers={"Authorization": f"Bearer {token}"}).status_code for _ in range(3)
+    ]
+
+    assert statuses == [200, 200, 200]
 
 
 def test_unexpected_errors_use_the_error_shape(api_environment: None, connection: psycopg.Connection) -> None:
@@ -232,8 +245,8 @@ def test_openapi_lists_only_the_endpoints_bots_use(client: TestClient) -> None:
         "/currencies/{abbreviation}",
         "/currencies/{currency_id}/history",
         "/currencies/{currency_id}/transactions",
-        "/events",
-        "/events/ack",
+        "/events/claim",
+        "/events/{event_id}/result",
         "/quote",
         "/transactions",
         "/transactions/pending",

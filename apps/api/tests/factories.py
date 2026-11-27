@@ -121,10 +121,8 @@ def feed_events(db: Connection, bot_id: UUID) -> list[tuple[int, str]]:
     return [(row["id"], row["event"]) for row in rows]
 
 
-def feed_position(db: Connection, bot_id: UUID) -> dict[str, int]:
-    return db.execute(
-        "SELECT last_event_id, acknowledged_event_id FROM bot_feeds WHERE bot_id = %s", (bot_id,)
-    ).fetchone()
+def last_event_id(db: Connection, bot_id: UUID) -> int:
+    return db.execute("SELECT last_event_id FROM bot_feeds WHERE bot_id = %s", (bot_id,)).fetchone()["last_event_id"]
 
 
 def log_in(client: TestClient, db: Connection, user_id: str) -> None:

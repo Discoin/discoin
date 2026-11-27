@@ -401,21 +401,13 @@ const EVENTS: EndpointGroup = {
     "These endpoints need your bot's API token and only work while your bot has no webhook URL. The event feed section below explains how to use them.",
   endpoints: [
     {
-      id: "get-events",
-      method: "GET",
-      path: "/events",
+      id: "post-events-claim",
+      method: "POST",
+      path: "/events/claim",
       purpose:
-        "Lists the events your bot has not acknowledged yet, oldest first. An empty list means nothing is new. A full batch means more are waiting, so call again at once.",
+        "Takes the events that are due for your bot, oldest first, and leases them to it for 2 minutes. Each event carries attempt, its try number, starting at 1. An event you don't report on comes back after the lease plus a backoff. An empty list means nothing is due. A full batch means more are waiting, so call again at once.",
       needsToken: true,
       fields: [
-        {
-          name: "after",
-          location: "Query",
-          type: "integer",
-          required: false,
-          description:
-            "List events with an ID above this one. Without it, the list starts after the last ID your bot acknowledged. It never moves that cursor.",
-        },
         {
           name: "limit",
           location: "Query",
@@ -425,13 +417,14 @@ const EVENTS: EndpointGroup = {
             "How many events to return, from 1 to 100. 100 if left out.",
         },
       ],
-      request: `curl ${API_URL}/events \\
+      request: `curl -X POST ${API_URL}/events/claim \\
   -H "Authorization: Bearer $DISCOIN_TOKEN"`,
       responseStatus: "200 OK",
       response: json({
         events: [
           {
             id: 41,
+            attempt: 1,
             event: "transaction.created",
             test: false,
             transaction: WEBHOOK_TRANSACTION,
@@ -443,39 +436,55 @@ const EVENTS: EndpointGroup = {
         HAS_WEBHOOK_URL,
         {
           status: 422,
-          when: "after is not a whole number, or limit is not a whole number from 1 to 100.",
+          when: "limit is not a whole number from 1 to 100.",
         },
       ],
     },
     {
-      id: "post-events-ack",
+      id: "post-event-result",
       method: "POST",
-      path: "/events/ack",
+      path: "/events/{id}/result",
       purpose:
-        "Acknowledges every event up to an ID, so GET /events stops returning them. Call it after your bot has handled them. An ID your bot already acknowledged changes nothing.",
+        "Reports what your bot did with an event it claimed. Handled finishes the event for good, and repeating it changes nothing. Unhandled brings the event back after a backoff that starts at 1 minute and doubles. After 8 tries the event is dead and is not returned again.",
       needsToken: true,
       fields: [
         {
           name: "id",
-          location: "Body",
+          location: "Path",
           type: "integer",
           required: true,
-          description: "The highest event ID your bot has handled.",
+          description: "The event's ID.",
+        },
+        {
+          name: "handled",
+          location: "Body",
+          type: "boolean",
+          required: true,
+          description:
+            "true when your bot handled the event, false when it could not and wants it again later.",
         },
       ],
-      request: `curl -X POST ${API_URL}/events/ack \\
+      request: `curl -X POST ${API_URL}/events/41/result \\
   -H "Authorization: Bearer $DISCOIN_TOKEN" \\
   -H "Content-Type: application/json" \\
-  -d '{"id": 41}'`,
+  -d '{"handled": true}'`,
       responseStatus: "204 No Content",
       response: "",
       errors: [
         {
           status: 400,
-          when: "id is missing, not a whole number, or above your bot's newest event.",
+          when: "id is not a whole number, or handled is missing or not true or false.",
         },
         MISSING_TOKEN,
+        {
+          status: 404,
+          when: "No event of your bot has that ID, or it was deleted after 24 hours.",
+        },
         HAS_WEBHOOK_URL,
+        {
+          status: 409,
+          when: "Your bot never claimed the event, or handled is false and the event is already handled or dead.",
+        },
       ],
     },
   ],

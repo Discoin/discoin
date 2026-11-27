@@ -1,4 +1,5 @@
 import shutil
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
@@ -300,10 +301,10 @@ def test_event_feed_migration_gives_existing_and_new_bots_an_empty_feed(
     apply_migrations(connection, MIGRATIONS_DIRECTORY)
     connection.execute(insert_bot, (added_later, "400000000000000005", BLOCKED_USER))
 
-    feeds = connection.execute("SELECT bot_id, last_event_id, acknowledged_event_id FROM bot_feeds ORDER BY bot_id")
+    feeds = connection.execute("SELECT bot_id, last_event_id FROM bot_feeds ORDER BY bot_id")
     assert feeds.fetchall() == [
-        {"bot_id": UUID(existing), "last_event_id": 0, "acknowledged_event_id": 0},
-        {"bot_id": UUID(added_later), "last_event_id": 0, "acknowledged_event_id": 0},
+        {"bot_id": UUID(existing), "last_event_id": 0},
+        {"bot_id": UUID(added_later), "last_event_id": 0},
     ]
 
 
@@ -391,6 +392,38 @@ def test_webhook_tests_migration_adds_test_false_to_stored_payloads_that_lack_it
     backfilled = [{"event": "transaction.created", "test": False}, {"event": "transaction.created", "test": True}]
     assert [row["payload"] for row in events] == backfilled
     assert [row["payload"] for row in deliveries] == backfilled
+
+
+def test_event_results_migration_marks_events_at_or_below_the_cursor_handled_and_drops_the_cursor(
+    connection: psycopg.Connection, tmp_path: Path
+) -> None:
+    bot = "019a8000-0000-7000-8000-000000000051"
+    created_at = datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
+    insert_event = "INSERT INTO bot_events (bot_id, id, event, payload, created_at) VALUES (%s, %s, 'e', '{}', %s)"
+
+    for migration in sorted(MIGRATIONS_DIRECTORY.glob("000[1-7]_*.sql")):
+        shutil.copy(migration, tmp_path / migration.name)
+
+    apply_migrations(connection, tmp_path)
+    connection.execute(
+        "INSERT INTO bots (id, name, discord_id, owner_id) VALUES (%s, 'Oat bot', '400000000000000004', %s)",
+        (bot, BLOCKED_USER),
+    )
+
+    for event_id in (1, 2, 3):
+        connection.execute(insert_event, (bot, event_id, created_at))
+
+    connection.execute("UPDATE bot_feeds SET last_event_id = 3, acknowledged_event_id = 2")
+
+    apply_migrations(connection, MIGRATIONS_DIRECTORY)
+
+    events = connection.execute("SELECT id, state, attempt, next_attempt_at FROM bot_events ORDER BY id").fetchall()
+    assert events == [
+        {"id": 1, "state": "handled", "attempt": 0, "next_attempt_at": created_at},
+        {"id": 2, "state": "handled", "attempt": 0, "next_attempt_at": created_at},
+        {"id": 3, "state": "pending", "attempt": 0, "next_attempt_at": created_at},
+    ]
+    assert column_names(connection, "bot_feeds") == {"bot_id", "last_event_id"}
 
 
 def test_needs_autocommit_connection(database_url: str, tmp_path: Path) -> None:

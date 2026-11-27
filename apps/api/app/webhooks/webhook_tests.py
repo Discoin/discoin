@@ -90,8 +90,8 @@ def delete_expired_tests(db: Connection[DictRow], now: datetime) -> None:
 def find_live_test_progress(db: Connection[DictRow], lookup: LiveTestLookup) -> dict[str, Any] | None:
     return db.execute(
         f"""
-        SELECT t.path, t.marked_status, t.feed_event_id, f.acknowledged_event_id
-        FROM webhook_tests t JOIN bot_feeds f ON f.bot_id = t.bot_id
+        SELECT t.path, t.marked_status, e.attempt AS feed_event_attempt
+        FROM webhook_tests t LEFT JOIN bot_events e ON e.bot_id = t.bot_id AND e.id = t.feed_event_id
         WHERE {LIVE_TEST}
         """,
         lookup.parameters(),
@@ -102,7 +102,7 @@ def state_of(progress: dict[str, Any]) -> TestState:
     if progress["marked_status"] is not None:
         return "handled"
 
-    if progress["path"] == FEED_PATH and progress["acknowledged_event_id"] < progress["feed_event_id"]:
+    if progress["path"] == FEED_PATH and progress["feed_event_attempt"] == 0:
         return "waiting"
 
     return "delivered"

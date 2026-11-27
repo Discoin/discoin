@@ -329,7 +329,7 @@ def test_an_inactive_currency_is_still_listed_with_and_without_the_filter(
 
 
 @pytest.mark.parametrize("delivery", ["feed", "webhook"])
-def test_a_delivered_or_acknowledged_event_does_not_hide_the_item(
+def test_a_delivered_or_handled_event_does_not_hide_the_item(
     exchange: Exchange, client: TestClient, connection: psycopg.Connection, delivery: str
 ) -> None:
     if delivery == "webhook":
@@ -354,8 +354,9 @@ def test_a_delivered_or_acknowledged_event_does_not_hide_the_item(
         deliver_due_webhooks(connection, receiver.sender(), NOW)
         delivered = [request.read() for request in receiver.requests]
     else:
-        delivered = client.get("/events", headers=exchange.receiver).json()["events"]
-        client.post("/events/ack", headers=exchange.receiver, json={"id": delivered[-1]["id"]})
+        delivered = client.post("/events/claim", headers=exchange.receiver).json()["events"]
+        for event in delivered:
+            client.post(f"/events/{event['id']}/result", headers=exchange.receiver, json={"handled": True})
 
     assert len(delivered) == 2
     assert exchange.undone_ids(exchange.receiver) == [created]
